@@ -20,8 +20,8 @@ static_cols = ["Age", "Diagnosis", "Treatment code", "Diagnosis code", "case Spe
 cat_cols = ["Activity code", "Producer code", "Section", "group", "Diagnosis", "Specialism code", "Treatment code", "Diagnosis code", "case Specialism code", "Diagnosis Treatment Combination ID"]
 
 train_ratio = 0.8
-n_states = 3
-n_iter = 20
+n_states = 6
+n_iter = 30
 
 with open(outfile, 'w') as fout:
     for dataset_name, data_filepath in datasets.items():

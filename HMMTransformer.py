@@ -55,32 +55,51 @@ class HMMTransformer(TransformerMixin):
                     tmp_dt_hmm.extend(seq)
             if col in self.cat_cols:
                 hmms[col] = hmm.MultinomialHMM(n_components=self.n_states)
-                encoders[col] = LabelEncoder()
-                tmp_dt_hmm = encoders[col].fit_transform(tmp_dt_hmm)
+                #encoders[col] = LabelEncoder()
+                #tmp_dt_hmm = encoders[col].fit_transform(tmp_dt_hmm)
+                encoders[col] = {label:idx for idx, label in enumerate(set(tmp_dt_hmm))}
+                tmp_dt_hmm = [encoders[col][label] for label in tmp_dt_hmm]
+                
             else:
                 hmms[col] = hmm.GaussianHMM(n_components=self.n_states)
-
+                
             hmms[col] = hmms[col].fit(np.atleast_2d(tmp_dt_hmm).T, [min(val, self.max_seq_length) for val in grouped.size() if val >= self.min_seq_length])
+            
+            # check for buggy transition matrix
+            rowsums = hmms[col].transmat_.sum(axis=1)
+            if rowsums.sum() < len(rowsums):
+                for problem_row_idx in np.where(rowsums < 1)[0]:
+                    hmms[col].transmat_[problem_row_idx] = 1.0 / hmms[col].transmat_.shape[1]
+                
 
         return (hmms, encoders)
     
     
     def _calculate_scores(self, group):
         
+        if len(group) < self.min_seq_length:
+            return tuple([0] * len(self.dynamic_cols))
+        
         scores = []
         
         for col in self.dynamic_cols:
-            
             tmp_dt_hmm = [val for val in group.sort_values(self.timestamp_col, ascending=1)[col]]
             if self.max_seq_length is not None:
                 tmp_dt_hmm = tmp_dt_hmm[:self.max_seq_length]
             
             if col in self.cat_cols:
-                tmp_dt_hmm_pos = self.pos_encoders[col].fit_transform(tmp_dt_hmm)
-                tmp_dt_hmm_neg = self.neg_encoders[col].fit_transform(tmp_dt_hmm)
+                #tmp_dt_hmm_pos = self.pos_encoders[col].transform(tmp_dt_hmm)
+                #tmp_dt_hmm_neg = self.neg_encoders[col].transform(tmp_dt_hmm)
+                
+                tmp_dt_hmm_pos = [self.pos_encoders[col][label] for label in tmp_dt_hmm if label in self.pos_encoders[col]]
+                tmp_dt_hmm_neg = [self.neg_encoders[col][label] for label in tmp_dt_hmm if label in self.neg_encoders[col]]
             
-                pos_score = self.pos_hmms[col].score(np.atleast_2d(tmp_dt_hmm_pos).T)
-                neg_score = self.neg_hmms[col].score(np.atleast_2d(tmp_dt_hmm_neg).T)
+                pos_score = 0
+                neg_score = 0
+                if len(tmp_dt_hmm_pos) >= self.min_seq_length:
+                    pos_score = self.pos_hmms[col].score(np.atleast_2d(tmp_dt_hmm_pos).T)
+                if len(tmp_dt_hmm_neg) >= self.min_seq_length:   
+                    neg_score = self.neg_hmms[col].score(np.atleast_2d(tmp_dt_hmm_neg).T)
                 
             else:
                 pos_score = self.pos_hmms[col].score(np.atleast_2d(tmp_dt_hmm).T)
