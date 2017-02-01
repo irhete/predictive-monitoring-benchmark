@@ -21,7 +21,13 @@ class HMMTransformer(TransformerMixin):
         self.label_col = label_col
         self.pos_label = pos_label
         self.min_seq_length = min_seq_length
-        self.max_seq_length = max_seq_length
+        
+        if max_seq_length is None:
+            self.max_seq_length = 100000000
+        else:
+            self.max_seq_length = max_seq_length
+            
+        self.columns = None
         
     
     def fit(self, X, y=None):
@@ -36,6 +42,16 @@ class HMMTransformer(TransformerMixin):
         scores = X.groupby(self.case_id_col).apply(self._calculate_scores)
         dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s"%col for col in self.dynamic_cols])
         dt_scores[self.case_id_col] = scores.index
+        
+        # add missing columns if necessary
+        if self.columns is None:
+            self.columns = dt_scores.columns
+        else:
+            missing_cols = [col for col in self.columns if col not in dt_scores.columns]
+            for col in missing_cols:
+                dt_scores[col] = 0
+            dt_scores = dt_scores[self.columns]
+            
         return dt_scores
     
     
