@@ -145,7 +145,7 @@ with open(outfile, 'w') as fout:
             
             
                 preds_pos_label_idx = np.where(clss[method].classes_ == pos_label)[0][0]  
-                preds = clss[method].predict_proba(dt_test.drop([case_id_col, label_col], axis=1))
+                preds = cls.predict_proba(dt_test.drop([case_id_col, label_col], axis=1))
             
                 auc = roc_auc_score([1 if label==pos_label else 0 for label in dt_test[label_col]], preds[:,preds_pos_label_idx])
                 prec, rec, fscore, _ = precision_recall_fscore_support([1 if label==pos_label else 0 for label in dt_test[label_col]], [0 if pred < 0.5 else 1 for pred in preds[:,preds_pos_label_idx]], average="binary")
