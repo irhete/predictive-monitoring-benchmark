@@ -144,7 +144,7 @@ with open(outfile, 'w') as fout:
                     dt_test = dt_test.merge(dt_test_hmm_gen, on=case_id_col)
             
             
-                preds_pos_label_idx = np.where(clss[method].classes_ == pos_label)[0][0]  
+                preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0]  
                 preds = cls.predict_proba(dt_test.drop([case_id_col, label_col], axis=1))
             
                 auc = roc_auc_score([1 if label==pos_label else 0 for label in dt_test[label_col]], preds[:,preds_pos_label_idx])
