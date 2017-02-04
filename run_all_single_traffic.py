@@ -35,14 +35,13 @@ random_state = 22
 n_iter = 30
 n_states = 6
 
-methods = ["laststate", "agg", "combined"] # "hmm_disc", "hmm_gen", 
+methods = ["laststate"]#, "agg", "combined"] # "hmm_disc", "hmm_gen", 
 
 with open(outfile, 'w') as fout:
     
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name, data_filepath in datasets.items():
-        clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
         data = pd.read_csv(data_filepath, sep=";")
         
         # split into train and test using temporal split
@@ -52,26 +51,34 @@ with open(outfile, 'w') as fout:
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
         train = data[data[case_id_col].isin(train_ids)]
         test = data[~data[case_id_col].isin(train_ids)]
+        del data
+        del start_timestamps
 
         grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-        grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-
+        #grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+        del train
+        
         train_prefixes = grouped_train.head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
             tmp = grouped_train.head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
+        del grouped_train
         
         static_transformer = StaticTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=static_cat_cols, num_cols=static_num_cols, fillna=True)
         dt_static = static_transformer.fit_transform(train_prefixes)
         dt_test_static = static_transformer.transform(test)
+        del test
         
         for method in methods:
+            cls = RandomForestClassifier(n_estimators=500, random_state=22)
+            
             ### Last state ###
             if method == "laststate":
                 last_state_transformer = LastStateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
                 dt_last_state = last_state_transformer.fit_transform(train_prefixes)
                 dt_train = dt_static.merge(dt_last_state, on=case_id_col)
+                del dt_last_state
 
             ### Aggregated ###
             elif method == "agg":
@@ -101,7 +108,7 @@ with open(outfile, 'w') as fout:
                 dt_train = dt_train.merge(dt_hmm_gen, on=case_id_col)
         
             # fit classifier
-            clss[method].fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
+            cls.fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
 
         
             # test
@@ -112,6 +119,7 @@ with open(outfile, 'w') as fout:
                 if method == "laststate":
                     dt_test_last_state = last_state_transformer.transform(dt_test_prefix)
                     dt_test = dt_test_static.merge(dt_test_last_state, on=case_id_col)
+                    del dt_test_last_state
 
                 ### Aggregated ###
                 elif method == "agg":
@@ -148,4 +156,4 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "fscore", fscore))
                 sys.stdout.flush()
                 
-            del clss[method]
+            del cls
