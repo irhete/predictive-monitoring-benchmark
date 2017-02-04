@@ -36,13 +36,13 @@ n_iter = 30
 n_states = 6
 
 methods = ["laststate", "agg", "hmm_disc", "hmm_gen", "combined"]
-clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
 
 with open(outfile, 'w') as fout:
     
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name, data_filepath in datasets.items():
+        clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
         data = pd.read_csv(data_filepath, sep=";")
 
         # split into train and test using temporal split
@@ -104,11 +104,10 @@ with open(outfile, 'w') as fout:
             clss[method].fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
 
         
-        # test
-        for nr_events in prefix_lengths:
-            dt_test_prefix = grouped_test.head(nr_events)
+            # test
+            for nr_events in prefix_lengths:
+                dt_test_prefix = grouped_test.head(nr_events)
             
-            for method in methods:
                 ### Last state ###
                 if method == "laststate":
                     dt_test_last_state = last_state_transformer.transform(dt_test_prefix)

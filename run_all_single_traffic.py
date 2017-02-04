@@ -11,7 +11,7 @@ from transformers.HMMGenerativeTransformer import HMMGenerativeTransformer
 from sklearn.ensemble import RandomForestClassifier
 
 datasets = {"traffic_fines_f%s"%formula:"labeled_logs_csv_processed/traffic_fines_f%s.csv"%formula for formula in range(1,4)}
-outfile = "results_all_single_traffic_fines.csv"
+outfile = "results/results_all_single_traffic_fines.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -35,14 +35,14 @@ random_state = 22
 n_iter = 30
 n_states = 6
 
-methods = ["laststate", "agg", "hmm_disc", "hmm_gen", "combined"]
-clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
+methods = ["laststate", "agg", "combined"] # "hmm_disc", "hmm_gen", 
 
 with open(outfile, 'w') as fout:
     
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name, data_filepath in datasets.items():
+        clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
         data = pd.read_csv(data_filepath, sep=";")
         
         # split into train and test using temporal split

@@ -11,7 +11,7 @@ from transformers.HMMGenerativeTransformer import HMMGenerativeTransformer
 from sklearn.ensemble import RandomForestClassifier
 
 datasets = {"bpic2015_%s_f%s"%(municipality, formula):"labeled_logs_csv_processed/BPIC15_%s_f%s.csv"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)}
-outfile = "results_all_single_bpic2015.csv"
+outfile = "results/results_all_single_bpic2015.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -35,14 +35,14 @@ random_state = 22
 n_iter = 30
 n_states = 6
 
-methods = ["laststate", "agg", "hmm_disc", "hmm_gen", "combined"]
-clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
+methods = ["laststate", "agg", "combined"] # "hmm_disc", "hmm_gen", 
 
 with open(outfile, 'w') as fout:
     
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name, data_filepath in datasets.items():
+        clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
         data = pd.read_csv(data_filepath, sep=";")
         
         # add "parts" columns
@@ -100,18 +100,17 @@ with open(outfile, 'w') as fout:
             elif method == "combined":
                 dt_train = dt_static.merge(dt_last_state, on=case_id_col)
                 dt_train = dt_train.merge(dt_aggregate, on=case_id_col)
-                dt_train = dt_train.merge(dt_hmm_disc, on=case_id_col)
-                dt_train = dt_train.merge(dt_hmm_gen, on=case_id_col)
+                #dt_train = dt_train.merge(dt_hmm_disc, on=case_id_col)
+                #dt_train = dt_train.merge(dt_hmm_gen, on=case_id_col)
         
             # fit classifier
             clss[method].fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
 
         
-        # test
-        for nr_events in prefix_lengths:
-            dt_test_prefix = grouped_test.head(nr_events)
+            # test
+            for nr_events in prefix_lengths:
+                dt_test_prefix = grouped_test.head(nr_events)
             
-            for method in methods:
                 ### Last state ###
                 if method == "laststate":
                     dt_test_last_state = last_state_transformer.transform(dt_test_prefix)
@@ -136,8 +135,8 @@ with open(outfile, 'w') as fout:
                 elif method == "combined":
                     dt_test = dt_test_static.merge(dt_test_last_state, on=case_id_col)
                     dt_test = dt_test.merge(dt_test_aggregate, on=case_id_col)
-                    dt_test = dt_test.merge(dt_test_hmm_disc, on=case_id_col)
-                    dt_test = dt_test.merge(dt_test_hmm_gen, on=case_id_col)
+                    #dt_test = dt_test.merge(dt_test_hmm_disc, on=case_id_col)
+                    #dt_test = dt_test.merge(dt_test_hmm_gen, on=case_id_col)
             
             
                 preds_pos_label_idx = np.where(clss[method].classes_ == pos_label)[0][0]  
@@ -150,3 +149,6 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "precision", prec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "recall", rec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "fscore", fscore))
+                sys.stdout.flush()
+                
+            del clss[method]
