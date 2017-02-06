@@ -55,7 +55,7 @@ with open(outfile, 'w') as fout:
         del start_timestamps
 
         grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-        #grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+        grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         del train
         
         train_prefixes = grouped_train.head(prefix_lengths[0])
