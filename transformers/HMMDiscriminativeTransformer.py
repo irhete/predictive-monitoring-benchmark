@@ -5,7 +5,7 @@ from hmmlearn import hmm
 
 class HMMDiscriminativeTransformer(TransformerMixin):
     
-    def __init__(self, n_states, num_cols, cat_cols, case_id_col, timestamp_col, label_col, pos_label, min_seq_length=2, max_seq_length=None, random_state=None, n_iter=10, fillna=True):
+    def __init__(self, n_states, num_cols, cat_cols, case_id_col, label_col, pos_label, min_seq_length=2, max_seq_length=None, random_state=None, n_iter=10, fillna=True):
         
         self.pos_hmms = None
         self.neg_hmms = None
@@ -13,7 +13,6 @@ class HMMDiscriminativeTransformer(TransformerMixin):
         self.neg_encoders = None
         
         self.case_id_col = case_id_col
-        self.timestamp_col = timestamp_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         self.label_col = label_col
@@ -35,17 +34,18 @@ class HMMDiscriminativeTransformer(TransformerMixin):
     
     def fit(self, X, y=None):
         
-        self.pos_hmms, self.pos_encoders = self._train_hmms(X[X[self.label_col] == self.pos_label])
-        self.neg_hmms, self.neg_encoders = self._train_hmms(X[X[self.label_col] != self.pos_label])
+        if self.pos_hmms is None:
+            self.pos_hmms, self.pos_encoders = self._train_hmms(X[X[self.label_col] == self.pos_label])
+        if self.neg_hmms is None:
+            self.neg_hmms, self.neg_encoders = self._train_hmms(X[X[self.label_col] != self.pos_label])
         
         return self
     
     
     def transform(self, X, y=None):
-        grouped = X.sort_values(by=self.timestamp_col, ascending=True).groupby(self.case_id_col)
+        grouped = X.groupby(self.case_id_col)
         scores = grouped.apply(self._calculate_scores)
         dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s"%col for col in self.cat_cols + self.num_cols])
-        dt_scores[self.case_id_col] = scores.index
         
         # fill missing values with 0-s
         if self.fillna:
@@ -73,7 +73,7 @@ class HMMDiscriminativeTransformer(TransformerMixin):
             tmp_dt_hmm = []
             for name, group in grouped:
                 if len(group) >= self.min_seq_length:
-                    seq = [val for val in group.sort_values(self.timestamp_col, ascending=1)[col]]
+                    seq = [val for val in group[col]]
                     if self.max_seq_length is not None:
                         seq = seq[:self.max_seq_length]
                     tmp_dt_hmm.extend(seq)
@@ -87,7 +87,7 @@ class HMMDiscriminativeTransformer(TransformerMixin):
                 
             hmms[col] = hmms[col].fit(np.atleast_2d(tmp_dt_hmm).T, [min(val, self.max_seq_length) for val in grouped.size() if val >= self.min_seq_length])
             
-            # check for buggy transition matrix
+            # fix buggy transition matrices
             rowsums = hmms[col].transmat_.sum(axis=1)
             if rowsums.sum() < len(rowsums):
                 for problem_row_idx in np.where(rowsums < 1)[0]:
@@ -105,7 +105,7 @@ class HMMDiscriminativeTransformer(TransformerMixin):
         scores = []
 
         for col in self.cat_cols + self.num_cols:
-            tmp_dt_hmm = [val for val in group.sort_values(self.timestamp_col, ascending=1)[col]]
+            tmp_dt_hmm = [val for val in group[col]]
             if self.max_seq_length is not None:
                 tmp_dt_hmm = tmp_dt_hmm[:self.max_seq_length]
 

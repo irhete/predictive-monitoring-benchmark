@@ -4,12 +4,11 @@ import numpy as np
 
 class IndexBasedTransformer(TransformerMixin):
     
-    def __init__(self, case_id_col, timestamp_col, cat_cols, num_cols, nr_events, fillna=True):
+    def __init__(self, case_id_col, cat_cols, num_cols, max_events=None, fillna=True):
         self.case_id_col = case_id_col
-        self.timestamp_col = timestamp_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
-        self.nr_events = nr_events
+        self.max_events = max_events
         self.fillna = fillna
         self.columns = None
     
@@ -19,23 +18,20 @@ class IndexBasedTransformer(TransformerMixin):
     
     def transform(self, X, y=None):
         
-        grouped = X.sort_values(by=self.timestamp_col, ascending=True).groupby(self.case_id_col, as_index=False)
+        grouped = X.groupby(self.case_id_col, as_index=False)
         
-        dt_transformed = pd.DataFrame({self.case_id_col:X[self.case_id_col].unique()})
+        if self.max_events is None:
+            max_events = grouped.size().max()
         
-        for i in range(self.nr_events):
+        dt_transformed = pd.DataFrame(grouped.apply(lambda x: x.name), columns=[self.case_id_col])
+        for i in range(max_events):
             dt_index = grouped.nth(i)[[self.case_id_col] + self.cat_cols + self.num_cols]
             dt_index.columns = [self.case_id_col] + ["%s_%s"%(col, i) for col in self.cat_cols] + ["%s_%s"%(col, i) for col in self.num_cols]
             dt_transformed = pd.merge(dt_transformed, dt_index, on=self.case_id_col, how="left")
         
-        # encode cat cols
-        all_cat_cols = ["%s_%s"%(col, i) for col in self.cat_cols for i in range(self.nr_events)]
-        
-        dt_cat = pd.get_dummies(dt_transformed[all_cat_cols])
-        
-        dt_transformed = dt_transformed[[col for col in dt_transformed.columns if col not in all_cat_cols]]
-        dt_transformed = pd.concat([dt_transformed, dt_cat], axis=1)
-       
+        # one-hot-encode cat cols
+        all_cat_cols = ["%s_%s"%(col, i) for col in self.cat_cols for i in range(max_events)]
+        dt_transformed = pd.get_dummies(dt_transformed, columns=all_cat_cols).drop(self.case_id_col, axis=1)
         
         # fill missing values with 0-s
         if self.fillna:

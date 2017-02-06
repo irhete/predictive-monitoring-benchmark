@@ -5,13 +5,12 @@ from hmmlearn import hmm
 
 class HMMGenerativeTransformer(TransformerMixin):
     
-    def __init__(self, n_states, num_cols, cat_cols, case_id_col, timestamp_col, min_seq_length=2, max_seq_length=None, random_state=None, n_iter=10, fillna=True):
+    def __init__(self, n_states, num_cols, cat_cols, case_id_col, min_seq_length=2, max_seq_length=None, random_state=None, n_iter=10, fillna=True):
         
         self.hmms = None
         self.encoders = None
         
         self.case_id_col = case_id_col
-        self.timestamp_col = timestamp_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         
@@ -31,13 +30,14 @@ class HMMGenerativeTransformer(TransformerMixin):
     
     def fit(self, X, y=None):
         
-        self.hmms, self.encoders = self._train_hmms(X)
+        if self.hmms is None:
+            self.hmms, self.encoders = self._train_hmms(X)
         
         return self
     
     
     def transform(self, X, y=None):
-        grouped = X.sort_values(by=self.timestamp_col, ascending=True).groupby(self.case_id_col)
+        grouped = X.groupby(self.case_id_col)
         scores = grouped.apply(self._calculate_scores)
         dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s_state%s"%(col, state) for col in self.cat_cols + self.num_cols for state in range(self.n_states)])
         dt_scores[self.case_id_col] = scores.index
@@ -68,7 +68,7 @@ class HMMGenerativeTransformer(TransformerMixin):
             tmp_dt_hmm = []
             for name, group in grouped:
                 if len(group) >= self.min_seq_length:
-                    seq = [val for val in group.sort_values(self.timestamp_col, ascending=1)[col]]
+                    seq = [val for val in group[col]]
                     if self.max_seq_length is not None:
                         seq = seq[:self.max_seq_length]
                     tmp_dt_hmm.extend(seq)
@@ -100,7 +100,7 @@ class HMMGenerativeTransformer(TransformerMixin):
         scores = []
 
         for col in self.cat_cols + self.num_cols:
-            tmp_dt_hmm = [val for val in group.sort_values(self.timestamp_col, ascending=1)[col]]
+            tmp_dt_hmm = [val for val in group[col]]
             if self.max_seq_length is not None:
                 tmp_dt_hmm = tmp_dt_hmm[:self.max_seq_length]
 

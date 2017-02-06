@@ -3,42 +3,44 @@ import pandas as pd
 
 class LastStateTransformer(TransformerMixin):
     
-    def __init__(self, case_id_col, timestamp_col, cat_cols, num_cols, fillna=True):
+    def __init__(self, case_id_col, cat_cols, num_cols, fillna=True):
         self.case_id_col = case_id_col
-        self.timestamp_col = timestamp_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         self.fillna = fillna
+        
         self.columns = None
-    
+        
     
     def fit(self, X, y=None):
         return self
     
+    
     def transform(self, X, y=None):
         
-        dt_last = X.sort_values(by=self.timestamp_col, ascending=True).groupby(self.case_id_col).last()
-        dt_last[self.case_id_col] = dt_last.index
+        dt_last = X.groupby(self.case_id_col).last()
         
         # transform numeric cols
-        dt_transformed = dt_last[[self.case_id_col] + self.num_cols]
+        dt_transformed = dt_last[self.num_cols]
         
         # transform cat cols
         if len(self.cat_cols) > 0:
             dt_cat = pd.get_dummies(dt_last[self.cat_cols])
             dt_transformed = pd.concat([dt_transformed, dt_cat], axis=1)
         
-        # fill missing values with 0-s
+        # fill NA with 0 if requested
         if self.fillna:
             dt_transformed.fillna(0, inplace=True)
             
         # add missing columns if necessary
-        if self.columns is None:
-            self.columns = dt_transformed.columns
-        else:
+        if self.columns is not None:
             missing_cols = [col for col in self.columns if col not in dt_transformed.columns]
             for col in missing_cols:
                 dt_transformed[col] = 0
             dt_transformed = dt_transformed[self.columns]
-            
+        else:
+            self.columns = dt_transformed.columns
+        
         return dt_transformed
+    
+    

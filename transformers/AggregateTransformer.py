@@ -4,12 +4,12 @@ import numpy as np
 
 class AggregateTransformer(TransformerMixin):
     
-    def __init__(self, case_id_col, timestamp_col, cat_cols, num_cols, fillna=True):
+    def __init__(self, case_id_col, cat_cols, num_cols, fillna=True):
         self.case_id_col = case_id_col
-        self.timestamp_col = timestamp_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         self.fillna = fillna
+        
         self.columns = None
     
     
@@ -18,23 +18,21 @@ class AggregateTransformer(TransformerMixin):
     
     def transform(self, X, y=None):
         
-        grouped = X.sort_values(by=self.timestamp_col, ascending=True).groupby(self.case_id_col)
+        grouped = X.groupby(self.case_id_col)
         
         # transform numeric cols
-        dt_numeric = pd.DataFrame(index=X[self.case_id_col].unique())
+        dt_numeric = pd.DataFrame()
         for col in self.num_cols:
             tmp = grouped[col].agg({'%s_mean'%col:np.mean, '%s_max'%col:np.max, '%s_min'%col:np.min, '%s_sum'%col:np.sum, '%s_std'%col:np.std})
-            dt_numeric = dt_numeric.merge(tmp, left_index=True, right_index=True)
+            dt_numeric = pd.concat([dt_numeric, tmp], axis=1)
         
         # transform cat cols
         dt_cat = pd.get_dummies(X[self.cat_cols])
         dt_cat[self.case_id_col] = X[self.case_id_col]
         dt_cat = dt_cat.groupby(self.case_id_col).sum()
-        dt_cat[self.case_id_col] = dt_cat.index.get_level_values(self.case_id_col)
         
         # merge
-        dt_transformed = dt_cat.merge(dt_numeric, left_index=True, right_index=True)
-        dt_transformed[self.case_id_col] = dt_transformed.index.get_level_values(self.case_id_col)
+        dt_transformed = pd.concat([dt_cat, dt_numeric], axis=1)
         
         # fill missing values with 0-s
         if self.fillna:

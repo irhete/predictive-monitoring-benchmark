@@ -11,7 +11,7 @@ from transformers.HMMGenerativeTransformer import HMMGenerativeTransformer
 from sklearn.ensemble import RandomForestClassifier
 
 datasets = {"bpic2015_%s_f%s"%(municipality, formula):"labeled_logs_csv_processed/BPIC15_%s_f%s.csv"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)}
-outfile = "results/results_all_single_bpic2015.csv"
+outfile = "results/results_combined_single_bpic2015.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -35,14 +35,13 @@ random_state = 22
 n_iter = 30
 n_states = 6
 
-methods = ["laststate", "agg", "combined"] # "hmm_disc", "hmm_gen", 
+methods = ["combined"] # "hmm_disc", "hmm_gen", "laststate", "agg", 
 
 with open(outfile, 'w') as fout:
     
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name, data_filepath in datasets.items():
-        clss = {method:RandomForestClassifier(n_estimators=500, random_state=22) for method in methods}
         data = pd.read_csv(data_filepath, sep=";")
         
         # add "parts" columns
@@ -70,77 +69,54 @@ with open(outfile, 'w') as fout:
         dt_test_static = static_transformer.transform(test)
         
         for method in methods:
+            cls = RandomForestClassifier(n_estimators=500, random_state=22)
+            
             ### Last state ###
             if method == "laststate":
-                last_state_transformer = LastStateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
-                dt_last_state = last_state_transformer.fit_transform(train_prefixes)
-                dt_train = dt_static.merge(dt_last_state, on=case_id_col)
+                dynamic_transformer = LastStateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
 
             ### Aggregated ###
             elif method == "agg":
-                aggregate_transformer = AggregateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
-                dt_aggregate = aggregate_transformer.fit_transform(train_prefixes)
-                dt_train = dt_static.merge(dt_aggregate, on=case_id_col)
+                dynamic_transformer = AggregateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
 
             ### HMM discriminative ###
             elif method == "hmm_disc":
-                hmm_discriminative_transformer = HMMDiscriminativeTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, n_states=n_states, label_col=label_col, pos_label=pos_label, min_seq_length=min_seq_length, max_seq_length=max_seq_length, random_state=random_state, n_iter=n_iter, fillna=True)
-                hmm_discriminative_transformer.fit(train)
-                dt_hmm_disc = hmm_discriminative_transformer.transform(train_prefixes)
-                dt_train = dt_static.merge(dt_hmm_disc, on=case_id_col)
+                dynamic_transformer = HMMDiscriminativeTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, n_states=n_states, label_col=label_col, pos_label=pos_label, min_seq_length=min_seq_length, max_seq_length=max_seq_length, random_state=random_state, n_iter=n_iter, fillna=True)
+                dynamic_transformer.fit(train)
 
             ### HMM generative ###
             elif method == "hmm_gen":
-                hmm_generative_transformer = HMMGenerativeTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, n_states=n_states, min_seq_length=min_seq_length, max_seq_length=max_seq_length, random_state=random_state, n_iter=n_iter, fillna=True)
-                hmm_generative_transformer.fit(train)
-                dt_hmm_gen = hmm_generative_transformer.transform(train_prefixes)
-                dt_train = dt_static.merge(dt_hmm_gen, on=case_id_col)
+                dynamic_transformer = HMMGenerativeTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, n_states=n_states, min_seq_length=min_seq_length, max_seq_length=max_seq_length, random_state=random_state, n_iter=n_iter, fillna=True)
+                dynamic_transformer.fit(train)
             
             ### Combined ###
             elif method == "combined":
-                dt_train = dt_static.merge(dt_last_state, on=case_id_col)
-                dt_train = dt_train.merge(dt_aggregate, on=case_id_col)
-                #dt_train = dt_train.merge(dt_hmm_disc, on=case_id_col)
-                #dt_train = dt_train.merge(dt_hmm_gen, on=case_id_col)
+                dynamic_transformer1 = LastStateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
+                dynamic_transformer2 = AggregateTransformer(case_id_col=case_id_col, timestamp_col=timestamp_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=True)
+                dt_train = dt_static.merge(dynamic_transformer1.transform(train_prefixes), on=case_id_col)
+                dt_train = dt_train.merge(dynamic_transformer2.transform(train_prefixes), on=case_id_col)
         
+            if method != "combined":
+                # encode dynamic data and merge with static
+                dt_train = dt_static.merge(dynamic_transformer.transform(train_prefixes), on=case_id_col)
+            
             # fit classifier
-            clss[method].fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
+            cls.fit(dt_train.drop([case_id_col, label_col], axis=1), dt_train[label_col])
 
         
             # test
             for nr_events in prefix_lengths:
                 dt_test_prefix = grouped_test.head(nr_events)
             
-                ### Last state ###
-                if method == "laststate":
-                    dt_test_last_state = last_state_transformer.transform(dt_test_prefix)
-                    dt_test = dt_test_static.merge(dt_test_last_state, on=case_id_col)
+                if method != "combined":
+                    dt_test = dt_test_static.merge(dynamic_transformer.transform(dt_test_prefix), on=case_id_col)
+                else:
+                    dt_test = dt_test_static.merge(dynamic_transformer1.transform(dt_test_prefix), on=case_id_col)
+                    dt_test = dt_test.merge(dynamic_transformer2.transform(dt_test_prefix), on=case_id_col)
+                        
 
-                ### Aggregated ###
-                elif method == "agg":
-                    dt_test_aggregate = aggregate_transformer.transform(dt_test_prefix)
-                    dt_test = dt_test_static.merge(dt_test_aggregate, on=case_id_col)
-
-                ### HMM discriminative ###
-                elif method == "hmm_disc":
-                    dt_test_hmm_disc = hmm_discriminative_transformer.transform(dt_test_prefix)
-                    dt_test = dt_test_static.merge(dt_test_hmm_disc, on=case_id_col)
-
-                ### HMM generative ###
-                elif method == "hmm_gen":
-                    dt_test_hmm_gen = hmm_generative_transformer.transform(dt_test_prefix)
-                    dt_test = dt_test_static.merge(dt_test_hmm_gen, on=case_id_col)
-
-                ### Combined ###
-                elif method == "combined":
-                    dt_test = dt_test_static.merge(dt_test_last_state, on=case_id_col)
-                    dt_test = dt_test.merge(dt_test_aggregate, on=case_id_col)
-                    #dt_test = dt_test.merge(dt_test_hmm_disc, on=case_id_col)
-                    #dt_test = dt_test.merge(dt_test_hmm_gen, on=case_id_col)
-            
-            
-                preds_pos_label_idx = np.where(clss[method].classes_ == pos_label)[0][0]  
-                preds = clss[method].predict_proba(dt_test.drop([case_id_col, label_col], axis=1))
+                preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0]  
+                preds = cls.predict_proba(dt_test.drop([case_id_col, label_col], axis=1))
 
                 auc = roc_auc_score([1 if label==pos_label else 0 for label in dt_test[label_col]], preds[:,preds_pos_label_idx])
                 prec, rec, fscore, _ = precision_recall_fscore_support([1 if label==pos_label else 0 for label in dt_test[label_col]], [0 if pred < 0.5 else 1 for pred in preds[:,preds_pos_label_idx]], average="binary")
@@ -149,6 +125,3 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "precision", prec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "recall", rec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method, nr_events, "fscore", fscore))
-                sys.stdout.flush()
-                
-            del clss[method]
