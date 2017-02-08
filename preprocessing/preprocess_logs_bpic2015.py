@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 import os
 
-input_data_folder = "labeled_logs_csv"
-output_data_folder = "labeled_logs_csv_processed"
+input_data_folder = "../labeled_logs_csv"
+output_data_folder = "../labeled_logs_csv_processed"
 filenames = ["BPIC15_%s_f%s.csv"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 
 case_id_col = "Case ID"
@@ -13,6 +13,8 @@ label_col = "label"
 pos_label = "deviant"
 neg_label = "regular"
 
+category_freq_threshold = 10
+
 # features for classifier
 dynamic_cat_cols = ["Activity", "monitoringResource", "question", "Resource"]
 static_cat_cols = ["Responsible_actor"]
@@ -21,7 +23,7 @@ static_num_cols = ["SUMleges"]
 
 static_cols_base = static_cat_cols + static_num_cols + [case_id_col, label_col]
 dynamic_cols = dynamic_cat_cols + dynamic_num_cols + [timestamp_col]
-cat_cols_base = dynamic_cat_cols + static_cat_cols
+cat_cols = dynamic_cat_cols + static_cat_cols
 
 
 def split_parts(group, parts_col="parts"):
@@ -48,8 +50,6 @@ for filename in filenames:
 
     data.rename(columns=lambda x: x.replace('(case) ', ''), inplace=True)
     data = data[data["caseStatus"] == "G"] # G is closed, O is open
-    # replace infrequent questions with "other"
-    data.loc[~data["question"].isin(data["question"].value_counts()[:4].index.tolist()), "question"] = "other"
 
     # switch labels (deviant/regular was set incorrectly before)
     data = data.set_value(col=label_col, index=(data[label_col] == pos_label), value="normal")
@@ -60,7 +60,6 @@ for filename in filenames:
     ser = data.groupby(level=0).apply(split_parts)
     dt_parts = pd.get_dummies(ser).groupby(level=0).apply(lambda group: group.max())
     data = pd.concat([data, dt_parts], axis=1)
-    cat_cols = cat_cols_base + list(dt_parts.columns)
     static_cols = static_cols_base + list(dt_parts.columns)
 
     data = data[static_cols + dynamic_cols]
@@ -76,6 +75,12 @@ for filename in filenames:
         
     data[cat_cols] = data[cat_cols].fillna('missing')
     data = data.fillna(0)
+    
+    # set infrequent factor levels to "other"
+    for col in cat_cols:
+        counts = data[col].value_counts()
+        mask = data[col].isin(counts[counts >= category_freq_threshold].index)
+        data.loc[~mask, col] = "other"
     
     data.to_csv(os.path.join(output_data_folder,filename), sep=";", index=False)
     

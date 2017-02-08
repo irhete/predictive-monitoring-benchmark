@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 import os
 
-input_data_folder = "labeled_logs_csv"
-output_data_folder = "labeled_logs_csv_processed"
+input_data_folder = "../labeled_logs_csv"
+output_data_folder = "../labeled_logs_csv_processed"
 filenames = ["BPIC11_f%s.csv"%(formula) for formula in range(1,5)]
 
 case_id_col = "Case ID"
@@ -12,6 +12,8 @@ timestamp_col = "Complete Timestamp"
 label_col = "label"
 pos_label = "deviant"
 neg_label = "regular"
+
+category_freq_threshold = 10
 
 # features for classifier
 dynamic_cat_cols = ["Activity code", "Producer code", "Section", "Specialism code", "group"]
@@ -64,6 +66,12 @@ for filename in filenames:
         
     data[cat_cols] = data[cat_cols].fillna('missing')
     data = data.fillna(0)
+    
+    # set infrequent factor levels to "other"
+    for col in cat_cols:
+        counts = data[col].value_counts()
+        mask = data[col].isin(counts[counts >= category_freq_threshold].index)
+        data.loc[~mask, col] = "other"
     
     data.to_csv(os.path.join(output_data_folder,filename), sep=";", index=False)
     

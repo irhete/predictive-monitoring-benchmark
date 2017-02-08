@@ -59,7 +59,7 @@ class HMMDiscriminativeTransformer(TransformerMixin):
             for col in missing_cols:
                 dt_scores[col] = 0
             dt_scores = dt_scores[self.columns]
-            
+        print(dt_scores.shape)    
         return dt_scores
         
         
