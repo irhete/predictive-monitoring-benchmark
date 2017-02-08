@@ -1,9 +1,12 @@
+#!/usr/bin/env python -W ignore::DeprecationWarning
+
 import pandas as pd
 import numpy as np
 import sys
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from transformers.StaticTransformer import StaticTransformer
 from transformers.IndexBasedTransformer import IndexBasedTransformer
+from transformers.IndexBasedExtractor import IndexBasedExtractor
 from transformers.HMMDiscriminativeTransformer import HMMDiscriminativeTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline, FeatureUnion
@@ -33,8 +36,8 @@ random_state = 22
 fillna = True
 
 methods_dict = {
-    "index": ["static", "index"]}#,
-#    "index_hmm_combined": ["static", "index", "hmm_disc"]}
+    "index": ["static", "index"],
+    "index_hmm_combined": ["static", "index", "hmm_disc"]}
    
     
 ##### MAIN PART ######   
@@ -91,7 +94,6 @@ with open(outfile, 'w') as fout:
         for method_name, methods in methods_dict.items():
             
             for nr_events in prefix_lengths:
-                print(nr_events)
                 
                 # extract appropriate number of events for index-based encoding
                 index_extractor = IndexBasedExtractor(cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, max_events=nr_events, fillna=True)
@@ -131,11 +133,14 @@ with open(outfile, 'w') as fout:
                 
                 # test
                 preds = cls.predict_proba(test_X)[:,preds_pos_label_idx]
-                auc = roc_auc_score(test_y, preds)
+                print(preds)
+                if len(set(test_y)) < 2:
+                    auc = None
+                else:
+                    auc = roc_auc_score(test_y, preds)
                 prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds], average="binary")
 
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "auc", auc))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
-                print(" ")

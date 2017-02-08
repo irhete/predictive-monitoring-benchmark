@@ -145,10 +145,13 @@ with open(outfile, 'w') as fout:
                 relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
                 test_y = [1 if label==pos_label else 0 for label in relevant_grouped_test.first()[label_col]]
             
-                preds = pipeline.predict_proba(relevant_grouped_test.head(nr_events))
+                preds = pipeline.predict_proba(relevant_grouped_test.head(nr_events))[:,preds_pos_label_idx]
 
-                auc = roc_auc_score(test_y, preds[:,preds_pos_label_idx])
-                prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds[:,preds_pos_label_idx]], average="binary")
+                if len(set(test_y)) < 2:
+                    auc = None
+                else:
+                    auc = roc_auc_score(test_y, preds)
+                prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds], average="binary")
 
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "auc", auc))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))

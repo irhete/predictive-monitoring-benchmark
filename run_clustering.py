@@ -15,15 +15,15 @@ import dataset_confs
 
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
-datasets = ["insurance_activity", "insurance_followup"]
+#datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
+datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
 
 #outfile = "results/results_all_cluster_bpic2011.csv"
 #outfile = "results/results_all_cluster_bpic2015.csv"
-outfile = "results/results_all_cluster_insurance.csv"
+#outfile = "results/results_all_cluster_insurance.csv"
 #outfile = "results/results_all_cluster_traffic_fines.csv"
-#outfile = "results/results_cluster_public.csv"
+outfile = "results/results_cluster_public.csv"
 
 prefix_lengths = list(range(2,21))
 

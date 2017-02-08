@@ -45,7 +45,7 @@ class HMMDiscriminativeTransformer(TransformerMixin):
     def transform(self, X, y=None):
         grouped = X.groupby(self.case_id_col)
         scores = grouped.apply(self._calculate_scores)
-        dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s"%col for col in self.cat_cols + self.num_cols])
+        dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s"%col for col in self.cat_cols + self.num_cols], index=scores.index)
         
         # fill missing values with 0-s
         if self.fillna:
@@ -59,7 +59,6 @@ class HMMDiscriminativeTransformer(TransformerMixin):
             for col in missing_cols:
                 dt_scores[col] = 0
             dt_scores = dt_scores[self.columns]
-        print(dt_scores.shape)    
         return dt_scores
         
         
