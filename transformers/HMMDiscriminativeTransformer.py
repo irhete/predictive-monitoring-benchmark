@@ -123,8 +123,16 @@ class HMMDiscriminativeTransformer(TransformerMixin):
             else:
                 pos_score = self.pos_hmms[col].score(np.atleast_2d(tmp_dt_hmm).T)
                 neg_score = self.neg_hmms[col].score(np.atleast_2d(tmp_dt_hmm).T)
-
-            scores.append(pos_score - neg_score)
+            
+            score = pos_score - neg_score
+            
+            # check for infinity
+            if score == float('Inf'):
+                score = 1000
+            elif score == float('-Inf'):
+                score = -1000
+                
+            scores.append(score)
 
         return tuple(scores)
            
