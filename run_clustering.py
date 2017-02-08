@@ -15,15 +15,15 @@ import dataset_confs
 
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
-#datasets = ["insurance_activity", "insurance_followup"]
+datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
+#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
 
 #outfile = "results/results_all_cluster_bpic2011.csv"
 #outfile = "results/results_all_cluster_bpic2015.csv"
-#outfile = "results/results_all_cluster_insurance.csv"
+outfile = "results/results_all_cluster_insurance.csv"
 #outfile = "results/results_all_cluster_traffic_fines.csv"
-outfile = "results/results_cluster_public.csv"
+#outfile = "results/results_cluster_public.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -38,10 +38,10 @@ n_clusters = 20
 fillna = True
 
 methods_dict = {
-    "cluster_laststate": ["static", "laststate"],
-    "cluster_agg": ["static", "agg"],
-    "cluster_hmm_disc": ["static", "hmm_disc"],
-    "cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
+    "cluster_laststate": ["static", "laststate"]}#,
+#    "cluster_agg": ["static", "agg"],
+#    "cluster_hmm_disc": ["static", "hmm_disc"],
+#    "cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
 
 
 def init_encoder(method):
@@ -176,6 +176,9 @@ with open(outfile, 'w') as fout:
                     elif cl not in pipelines:
                         # no classifier exists for this cluster, hardcode predictions
                         current_cluster_preds = [0.5] * len(current_cluster_case_ids)
+                    elif len(pipelines[cl].named_steps["cls"].classes_) == 1:
+                        hardcoded_prediction = 1 if pipelines[cl].named_steps["cls"].classes_[0] == pos_label else 0
+                        current_cluster_preds = [hardcoded_prediction] * len(current_cluster_case_ids)
                     else:
                         # make predictions
                         preds_pos_label_idx = np.where(pipelines[cl].named_steps["cls"].classes_ == pos_label)[0][0] 
@@ -188,7 +191,10 @@ with open(outfile, 'w') as fout:
                     test_y.extend(current_cluster_test_y)
             
 
-                auc = roc_auc_score(test_y, preds)
+                if len(set(test_y)) < 2:
+                    auc = None
+                else:
+                    auc = roc_auc_score(test_y, preds)
                 prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds], average="binary")
 
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "auc", auc))

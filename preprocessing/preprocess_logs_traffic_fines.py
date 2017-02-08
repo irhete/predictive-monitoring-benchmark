@@ -52,12 +52,20 @@ def cut_before_activity(group):
 
 
 for filename in filenames:
+    print("Starting...")
     data = pd.read_csv(os.path.join(input_data_folder,filename), sep=";")
     
     data.rename(columns=lambda x: x.replace('(case) ', ''), inplace=True)
     
     data = data[static_cols + dynamic_cols]
     
+    print("Adding timestamp features...")
+    # add features extracted from timestamp
+    data[timestamp_col] = pd.to_datetime(data[timestamp_col])
+    data = data.groupby(case_id_col).apply(extract_timestamp_features)
+    
+    print(data.shape)
+    print("Cutting activities...")
     # cut traces before relevant activity happens
     if "f1" in filename:
         relevant_activity = "Payment"
@@ -65,11 +73,11 @@ for filename in filenames:
     elif "f3" in filename:
         relevant_activity = "Add penalty"
         data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+    print(data.shape)
     
-    # add features extracted from timestamp
-    data[timestamp_col] = pd.to_datetime(data[timestamp_col])
-    data = data.groupby(case_id_col).apply(extract_timestamp_features)
     
+    
+    print("imputing missing values...")
     # impute missing values
     grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
     for col in static_cols + dynamic_cols:
@@ -78,6 +86,7 @@ for filename in filenames:
     data[cat_cols] = data[cat_cols].fillna('missing')
     data = data.fillna(0)
     
+    print("Renaming infrequent levels...")
     # set infrequent factor levels to "other"
     for col in cat_cols:
         counts = data[col].value_counts()
