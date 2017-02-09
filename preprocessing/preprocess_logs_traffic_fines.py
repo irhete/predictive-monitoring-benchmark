@@ -49,6 +49,8 @@ def cut_before_activity(group):
     if len(relevant_activity_idxs) > 0:
         cut_idx = relevant_activity_idxs[0]
         return group[:cut_idx]
+    else:
+        return group
 
 
 for filename in filenames:
