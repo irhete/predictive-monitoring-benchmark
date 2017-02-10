@@ -2,7 +2,7 @@ from sklearn.base import TransformerMixin
 import pandas as pd
 from time import time
 
-class LastStateTransformer(TransformerMixin):
+class PreviousStateTransformer(TransformerMixin):
     
     def __init__(self, case_id_col, cat_cols, num_cols, fillna=True):
         self.case_id_col = case_id_col
@@ -23,7 +23,7 @@ class LastStateTransformer(TransformerMixin):
     def transform(self, X, y=None):
         start = time()
         
-        dt_last = X.groupby(self.case_id_col).last()
+        dt_last = X.groupby(self.case_id_col).nth(-2)
         
         # transform numeric cols
         dt_transformed = dt_last[self.num_cols]
@@ -32,7 +32,10 @@ class LastStateTransformer(TransformerMixin):
         if len(self.cat_cols) > 0:
             dt_cat = pd.get_dummies(dt_last[self.cat_cols])
             dt_transformed = pd.concat([dt_transformed, dt_cat], axis=1)
-        
+
+        # add 0 rows where previous value did not exist
+        dt_transformed = dt_transformed.reindex(X.groupby(self.case_id_col).first().index, fill_value=0)
+            
         # fill NA with 0 if requested
         if self.fillna:
             dt_transformed.fillna(0, inplace=True)

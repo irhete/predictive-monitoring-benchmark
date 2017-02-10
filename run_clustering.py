@@ -12,18 +12,26 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.cluster import KMeans
 import dataset_confs
+from time import time
+
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 #datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
+datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
 
 #outfile = "results/results_all_cluster_bpic2011.csv"
 #outfile = "results/results_all_cluster_bpic2015.csv"
 #outfile = "results/results_all_cluster_insurance.csv"
 #outfile = "results/results_all_cluster_traffic_fines.csv"
-outfile = "results/results_cluster_public.csv"
+#outfile = "results/results_cluster_public.csv"
+outfile = "results/results_all_cluster_small_logs.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -38,10 +46,10 @@ n_clusters = 20
 fillna = True
 
 methods_dict = {
-    "cluster_laststate": ["static", "laststate"]}#,
-#    "cluster_agg": ["static", "agg"],
-#    "cluster_hmm_disc": ["static", "hmm_disc"],
-#    "cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
+    "cluster_laststate": ["static", "laststate"],
+    "cluster_agg": ["static", "agg"],
+    "cluster_hmm_disc": ["static", "hmm_disc"],
+    "cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
 
 
 def init_encoder(method):
@@ -127,16 +135,19 @@ with open(outfile, 'w') as fout:
         
         
         # cluster prefixes based on control flow
+        start = time()
         freq_encoder = AggregateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
         data_freqs = freq_encoder.fit_transform(train_prefixes)
         clustering = KMeans(n_clusters, random_state=random_state)
         cluster_assignments = clustering.fit_predict(data_freqs)
+        clustering_time = time() - start
         
         
         for method_name, methods in methods_dict.items():
             
             pipelines = {}
             
+            start = time()
             # train and fit pipeline for each cluster
             for cl in range(n_clusters):
                 relevant_cases = data_freqs[cluster_assignments == cl].index
@@ -152,6 +163,10 @@ with open(outfile, 'w') as fout:
                 dt_train_cluster = train_prefixes[train_prefixes[case_id_col].isin(relevant_cases)].sort_values(timestamp_col, ascending=True)
                 train_y = dt_train_cluster.groupby(case_id_col).first()[label_col]
                 pipelines[cl].fit(dt_train_cluster, train_y)
+            total_encoding_cls_time = time() - start
+        
+            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "clustering_time", clustering_time))
+            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "total_encoding_cls_time", total_encoding_cls_time))
         
             # test separately for each prefix length
             for nr_events in prefix_lengths:
@@ -160,6 +175,7 @@ with open(outfile, 'w') as fout:
                 relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
                 relevant_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True)
             
+                start = time()
                 # get predicted cluster for each test case
                 data_freqs = freq_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
                 cluster_assignments = clustering.predict(data_freqs)
@@ -189,7 +205,7 @@ with open(outfile, 'w') as fout:
                     # extract actual label values
                     current_cluster_test_y = [1 if label==pos_label else 0 for label in current_cluster_grouped_test.first()[label_col]]
                     test_y.extend(current_cluster_test_y)
-            
+                total_prediction_time = time() - start
 
                 if len(set(test_y)) < 2:
                     auc = None
@@ -201,4 +217,5 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
+                fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "total_prediction_time", total_prediction_time))
                 

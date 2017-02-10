@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import TransformerMixin
 from hmmlearn import hmm
+from time import time
 
 class HMMGenerativeTransformer(TransformerMixin):
     
@@ -26,17 +27,24 @@ class HMMGenerativeTransformer(TransformerMixin):
             
         self.fillna = fillna
         self.columns = None
+        
+        self.fit_time = 0
+        self.transform_time = 0
     
     
     def fit(self, X, y=None):
+        start = time()
         
         if self.hmms is None:
             self.hmms, self.encoders = self._train_hmms(X)
         
+        self.fit_time = time() - start
         return self
     
     
     def transform(self, X, y=None):
+        start = time()
+        
         grouped = X.groupby(self.case_id_col)
         scores = grouped.apply(self._calculate_scores)
         dt_scores = pd.DataFrame.from_records(list(scores.values), columns=["hmm_%s_state%s"%(col, state) for col in self.cat_cols + self.num_cols for state in range(self.n_states)])
@@ -54,7 +62,8 @@ class HMMGenerativeTransformer(TransformerMixin):
             for col in missing_cols:
                 dt_scores[col] = 0
             dt_scores = dt_scores[self.columns]
-            
+        
+        self.transform_time = time() - start
         return dt_scores
         
         

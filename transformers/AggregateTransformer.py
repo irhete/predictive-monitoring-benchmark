@@ -1,6 +1,7 @@
 from sklearn.base import TransformerMixin
 import pandas as pd
 import numpy as np
+from time import time
 
 class AggregateTransformer(TransformerMixin):
     
@@ -11,12 +12,16 @@ class AggregateTransformer(TransformerMixin):
         self.fillna = fillna
         
         self.columns = None
+        
+        self.fit_time = 0
+        self.transform_time = 0
     
     
     def fit(self, X, y=None):
         return self
     
     def transform(self, X, y=None):
+        start = time()
         
         # transform cat cols
         dt_transformed = pd.get_dummies(X[self.cat_cols])
@@ -41,5 +46,6 @@ class AggregateTransformer(TransformerMixin):
             for col in missing_cols:
                 dt_transformed[col] = 0
             dt_transformed = dt_transformed[self.columns]
-            
+        
+        self.transform_time = time() - start
         return dt_transformed

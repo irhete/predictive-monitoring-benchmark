@@ -1,5 +1,3 @@
-#!/usr/bin/env python -W ignore::DeprecationWarning
-
 import pandas as pd
 import numpy as np
 import sys
@@ -11,18 +9,28 @@ from transformers.HMMDiscriminativeTransformer import HMMDiscriminativeTransform
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline, FeatureUnion
 import dataset_confs
+from time import time
+
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+
 
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 #datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
+#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
+datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
 
-outfile = "results/results_index_public.csv"
+#outfile = "results/results_index_public.csv"
 #outfile = "results/results_index_bpic2011.csv"
 #outfile = "results/results_index_bpic2015.csv"
 #outfile = "results/results_index_insurance.csv"
 #outfile = "results/results_index_traffic_fines.csv"
+outfile = "results/results_all_index_small_logs.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -83,22 +91,43 @@ with open(outfile, 'w') as fout:
         # encode all index-based
         index_encoder = IndexBasedTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols,
                                      max_events=prefix_lengths[-1], fillna=fillna)
+        
+        start = time()
         dt_train_index_all = index_encoder.transform(train.sort_values(timestamp_col, ascending=True))
+        train_index_encode_time_all += time() - start
+        
+        start = time()
         dt_test_index_all = index_encoder.transform(test.sort_values(timestamp_col, ascending=True))
+        test_index_encode_time_all += time() - start
         
         # encode all static
         static_transformer = StaticTransformer(case_id_col=case_id_col, cat_cols=static_cat_cols, num_cols=static_num_cols, fillna=fillna)
+        
+        start = time()
         dt_train_static = static_transformer.transform(train.sort_values(timestamp_col, ascending=True))
+        train_encode_time_base += time() - start
+        
+        start = time()
         dt_test_static = static_transformer.transform(test.sort_values(timestamp_col, ascending=True))
+        test_encode_time_base += time() - start
         
         for method_name, methods in methods_dict.items():
+            
+            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "train_index_encode_time_all", train_index_encode_time_all))
+            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "test_index_encode_time_all", test_index_encode_time_all))
             
             for nr_events in prefix_lengths:
                 
                 # extract appropriate number of events for index-based encoding
                 index_extractor = IndexBasedExtractor(cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, max_events=nr_events, fillna=True)
+                
+                start = time()
                 dt_train_index_prefix = index_extractor.transform(dt_train_index_all)
+                train_encode_time = train_encode_time_base + time() - start
+                
+                start = time()
                 dt_test_index_prefix = index_extractor.transform(dt_test_index_all)
+                test_encode_time = test_encode_time_base + time() - start
                 
                 # retain only test cases with length at least nr_events
                 relevant_test_static = dt_test_static[test_case_lengths >= nr_events]
@@ -112,6 +141,7 @@ with open(outfile, 'w') as fout:
                 
                 # fit and encode HMM if needed
                 if "hmm_disc" in methods:
+                    start = time()
                     hmm_disc_encoder = HMMDiscriminativeTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols,
                                                         num_cols=dynamic_num_cols, n_states=hmm_n_states, label_col=label_col,
                                                         pos_label=pos_label, min_seq_length=hmm_min_seq_length,
@@ -119,28 +149,39 @@ with open(outfile, 'w') as fout:
                                                         n_iter=hmm_n_iter, fillna=fillna)
                     dt_train_hmm = hmm_disc_encoder.fit_transform(train.sort_values(timestamp_col, ascending=True).groupby(case_id_col).head(nr_events))
                     train_X = pd.concat([train_X, dt_train_hmm], axis=1)
+                    train_encode_time += time() - start
                     
                     relevant_test_ids = test_case_lengths.index[test_case_lengths >= nr_events]
                     relevant_grouped_test = test[test[case_id_col].isin(relevant_test_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+                    start = time()
                     dt_test_hmm = hmm_disc_encoder.transform(relevant_grouped_test.head(nr_events))
                     test_X = pd.concat([test_X, dt_test_hmm], axis=1)
-                
+                    test_encode_time += time() - start
                 
                 # fit classifier
+                start = time()
                 cls = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=random_state)
                 cls.fit(train_X, train_y)
+                cls_fit_time = time() - start
                 preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0] 
                 
                 # test
+                start = time()
                 preds = cls.predict_proba(test_X)[:,preds_pos_label_idx]
-                print(preds)
+                cls_pred_time = time() - start
+
                 if len(set(test_y)) < 2:
                     auc = None
                 else:
                     auc = roc_auc_score(test_y, preds)
+                    
                 prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds], average="binary")
 
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "auc", auc))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
+                fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "train_encode_time", train_encode_time))
+                fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "test_encode_time", test_encode_time))
+                fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_fit_time", cls_fit_time))
+                fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_predict_time", cls_pred_time))
