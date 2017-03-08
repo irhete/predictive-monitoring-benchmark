@@ -4,7 +4,7 @@ import os
 
 input_data_folder = "../labeled_logs_csv"
 output_data_folder = "../labeled_logs_csv_processed"
-filenames = ["traffic_fines_f%s.csv"%i for i in range(1,4)]
+filenames = ["traffic_fines_f%s.csv"%i for i in [2]]
 
 
 case_id_col = "Case ID"
@@ -14,7 +14,8 @@ label_col = "label"
 pos_label = "deviant"
 neg_label = "regular"
 
-category_freq_threshold = 10
+#category_freq_threshold = 10
+max_category_levels = 10
 
 
 # features for classifier
@@ -92,8 +93,10 @@ for filename in filenames:
     # set infrequent factor levels to "other"
     for col in cat_cols:
         counts = data[col].value_counts()
-        mask = data[col].isin(counts[counts >= category_freq_threshold].index)
-        data.loc[~mask, col] = "other"
+        #mask = data[col].isin(counts[counts >= category_freq_threshold].index)
+        #data.loc[~mask, col] = "other"
+        mask = data[col].isin(counts.index[max_category_levels:])
+        data.loc[mask, col] = "other"
     
     data.to_csv(os.path.join(output_data_folder,filename), sep=";", index=False)
     

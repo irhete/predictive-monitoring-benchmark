@@ -21,17 +21,21 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
-#datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
+datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 #datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
+#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
+#datasets = ["siae"]
+#datasets = ["sepsis_cases"]
 
 #outfile = "results/results_all_cluster_bpic2011.csv"
-#outfile = "results/results_all_cluster_bpic2015.csv"
+outfile = "results/results_all_cluster_bpic2015.csv"
 #outfile = "results/results_all_cluster_insurance.csv"
 #outfile = "results/results_all_cluster_traffic_fines.csv"
 #outfile = "results/results_cluster_public.csv"
-outfile = "results/results_all_cluster_small_logs.csv"
+#outfile = "results/results_all_cluster_small_logs.csv"
+#outfile = "results/results_all_cluster_siae.csv"
+#outfile = "results/results_all_cluster_sepsis.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -120,21 +124,25 @@ with open(outfile, 'w') as fout:
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
         train = data[data[case_id_col].isin(train_ids)]
         test = data[~data[case_id_col].isin(train_ids)]
+        del data
+        del start_timestamps
+        del train_ids
 
         grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-        grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
-        test_case_lengths = grouped_test.size()
+        test_case_lengths = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
 
         # generate prefix data (each possible prefix becomes a trace)
+        print("Generating prefix data...")
         train_prefixes = grouped_train.head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
             tmp = grouped_train.head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-        
+        del grouped_train 
         
         # cluster prefixes based on control flow
+        print("Clustering prefixes...")
         start = time()
         freq_encoder = AggregateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
         data_freqs = freq_encoder.fit_transform(train_prefixes)
@@ -144,12 +152,14 @@ with open(outfile, 'w') as fout:
         
         
         for method_name, methods in methods_dict.items():
+            print("Starting method %s..."%method_name)
             
             pipelines = {}
             
             start = time()
             # train and fit pipeline for each cluster
             for cl in range(n_clusters):
+                print("Fitting pipeline for cluster %s..."%cl)
                 relevant_cases = data_freqs[cluster_assignments == cl].index
                 
                 if len(relevant_cases) == 0:
@@ -170,22 +180,27 @@ with open(outfile, 'w') as fout:
         
             # test separately for each prefix length
             for nr_events in prefix_lengths:
+                print("Predicting for %s events..."%nr_events)
                 
                 # select only cases that are at least of length nr_events
                 relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
+                if len(relevant_case_ids) == 0:
+                    break
                 relevant_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True)
-            
+                
+                del relevant_case_ids
+                    
                 start = time()
                 # get predicted cluster for each test case
-                data_freqs = freq_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
-                cluster_assignments = clustering.predict(data_freqs)
+                test_data_freqs = freq_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
+                test_cluster_assignments = clustering.predict(test_data_freqs)
                 
                 # use appropriate classifier for each bucket of test cases
                 preds = []
                 test_y = []
                 for cl in range(n_clusters):
-                    current_cluster_case_ids = data_freqs[cluster_assignments == cl].index
-                    current_cluster_grouped_test = relevant_test[relevant_test[case_id_col].isin(current_cluster_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+                    current_cluster_case_ids = test_data_freqs[test_cluster_assignments == cl].index
+                    current_cluster_grouped_test = relevant_test[relevant_test[case_id_col].isin(current_cluster_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
                     
                     if len(current_cluster_case_ids) == 0:
                         continue
@@ -219,3 +234,4 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "total_prediction_time", total_prediction_time))
                 
+            print("\n")

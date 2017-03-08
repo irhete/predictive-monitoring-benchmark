@@ -23,15 +23,17 @@ warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 #datasets = ["insurance_activity", "insurance_followup"]
-#datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
+datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
 #datasets = ["siae"]
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
+#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
+#datasets = ["sepsis_cases"]
 
 #outfile = "results/results_all_single_bpic2015.csv"
 #outfile = "results/results_all_single_insurance.csv"
-#outfile = "results/results_all_single_traffic.csv"
+outfile = "results/results_all_single_traffic.csv"
 #outfile = "results/results_all_single_siae.csv"
-outfile = "results/results_all_single_small_logs.csv"
+#outfile = "results/results_all_single_small_logs.csv"
+#outfile = "results/results_all_single_sepsis.csv"
 
 prefix_lengths = list(range(2,21))
 
@@ -95,7 +97,8 @@ with open(outfile, 'w') as fout:
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name in datasets:
-        
+        print("Started...")
+        sys.stdout.flush()
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
         activity_col = dataset_confs.activity_col[dataset_name]
@@ -116,31 +119,40 @@ with open(outfile, 'w') as fout:
             dtypes[col] = "float"
 
         # read data
+        print("Reading...")
+        sys.stdout.flush()
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
-
+        print("Splitting...")
+        sys.stdout.flush()
         # split into train and test using temporal split
-        grouped = data.groupby(case_id_col)
-        start_timestamps = grouped[timestamp_col].min().reset_index()
+        start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
         start_timestamps.sort_values(timestamp_col, ascending=1, inplace=True)
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
         train = data[data[case_id_col].isin(train_ids)]
         test = data[~data[case_id_col].isin(train_ids)]
+        del data
+        del start_timestamps
+        del train_ids
 
         grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-        grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
-        test_case_lengths = grouped_test.size()
+        test_case_lengths = test.groupby(case_id_col).size()
 
         # generate prefix data (each possible prefix becomes a trace)
+        print("Generating prefix data...")
+        sys.stdout.flush()
         train_prefixes = grouped_train.head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
             tmp = grouped_train.head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
+        del grouped_train
         
         
         for method_name, methods in methods_dict.items():
+            print("Starting method %s..."%method_name)
+            sys.stdout.flush()
             
             cls = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=random_state)
             feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])
@@ -149,6 +161,8 @@ with open(outfile, 'w') as fout:
             # fit pipeline
             train_y = train_prefixes.groupby(case_id_col).first()[label_col]
             
+            print("Fitting pipeline...")
+            sys.stdout.flush()
             start = time()
             pipeline.fit(train_prefixes, train_y)
             pipeline_fit_time = time() - start
@@ -169,13 +183,19 @@ with open(outfile, 'w') as fout:
                 
                 # select only cases that are at least of length nr_events
                 relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
-                relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+                if len(relevant_case_ids) == 0:
+                    break
+                relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
+                del relevant_case_ids
                 test_y = [1 if label==pos_label else 0 for label in relevant_grouped_test.first()[label_col]]
             
                 # predict
+                print("Predicting for %s events..."%nr_events)
+                sys.stdout.flush()
                 start = time()
                 preds = pipeline.predict_proba(relevant_grouped_test.head(nr_events))[:,preds_pos_label_idx]
                 pipeline_pred_time = time() - start
+                del relevant_grouped_test
                 test_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
                 cls_pred_time = pipeline_pred_time - test_encoding_transform_time
 
@@ -191,5 +211,7 @@ with open(outfile, 'w') as fout:
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_predict_time", cls_pred_time))
                 fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "encoder_transform_time_test", test_encoding_transform_time))
+                
+            print("\n")
                 
                 

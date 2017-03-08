@@ -6,7 +6,6 @@ from keras.layers import LSTM, Dense
 from keras.preprocessing import sequence
 from keras.optimizers import SGD, RMSprop, Adagrad
 from keras.utils import np_utils
-from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation
 from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import LSTM, GRU
@@ -33,7 +32,7 @@ prefix_lengths = list(range(2,21))
 
 train_ratio = 0.8
 max_len = 20
-lstmsize = 256
+lstmsize = 64
 dropout = 0
 optim = 'rmsprop'
 loss = 'binary_crossentropy'
@@ -141,11 +140,12 @@ with open(outfile, 'w') as fout:
         checkpointer = ModelCheckpoint(filepath=checkpoint_filepath, verbose=1, save_best_only=True, save_weights_only=True)
         history = model.fit(X, y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=2, validation_split=0.2, callbacks=[checkpointer])
         
-        with open(loss_file, 'w') as fout:
-            fout.write("epoch;train_loss;val_loss\n")
+        with open(loss_file, 'w') as fout2:
+            fout2.write("epoch;train_loss;val_loss\n")
             for epoch in range(nb_epoch):
-                fout.write("%s;%s;%s\n"%(epoch, history.history['loss'][epoch], history.history['val_loss'][epoch]))
-
+                fout2.write("%s;%s;%s\n"%(epoch, history.history['loss'][epoch], history.history['val_loss'][epoch]))
+        
+        
         # load the best weights
         lstm_weights_file = glob.glob("%s*.hdf5"%checkpoint_prefix)[-1]
         model.load_weights(lstm_weights_file)
@@ -191,4 +191,4 @@ with open(outfile, 'w') as fout:
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
-                
+                 
