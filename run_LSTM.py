@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import sys
+import os
 from keras.models import Sequential
 from keras.layers import LSTM, Dense
 from keras.preprocessing import sequence
@@ -19,7 +20,7 @@ import dataset_confs
 import glob
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 
-datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
+datasets = ["bpic2011_f%s"%formula for formula in range(1,2)]
 #datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
 #datasets = ["insurance_activity", "insurance_followup"]
 #datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
@@ -32,7 +33,7 @@ prefix_lengths = list(range(2,21))
 
 train_ratio = 0.8
 max_len = 20
-lstmsize = 64
+lstmsize = 512
 dropout = 0
 optim = 'rmsprop'
 loss = 'binary_crossentropy'
@@ -61,6 +62,10 @@ with open(outfile, 'w') as fout:
         checkpoint_filepath = "%s.{epoch:02d}-{val_loss:.2f}.hdf5"%checkpoint_prefix
         loss_file = "loss_files/%s_loss_lstmsize%s_dropout%s.txt"%(dataset_name, lstmsize, int(dropout*100))
         
+        pos_label = dataset_confs.pos_label[dataset_name]
+        neg_label = dataset_confs.neg_label[dataset_name]
+        
+        """
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
         activity_col = dataset_confs.activity_col[dataset_name]
@@ -124,9 +129,17 @@ with open(outfile, 'w') as fout:
         y = pd.get_dummies(y)
         classes = y.columns
         y = y.as_matrix()
+        """
+        
+        X = np.load(os.path.join("input_lstm", "%s_train_X.npy"%dataset_name))
+        y = np.load(os.path.join("input_lstm", "%s_train_y.npy"%dataset_name))
+        classes = np.array([neg_label, pos_label])
+        
+        data_dim = X.shape[2]
         
         method_name = "lstm"
-            
+        
+        
         print('Build model...')
         model = Sequential()
         model.add(LSTM(lstmsize, input_shape=(time_dim, data_dim)))
@@ -136,14 +149,15 @@ with open(outfile, 'w') as fout:
         print('Compiling model...')
         model.compile(loss=loss, optimizer=optim)
         
+        
         print("Training...")
         checkpointer = ModelCheckpoint(filepath=checkpoint_filepath, verbose=1, save_best_only=True, save_weights_only=True)
         history = model.fit(X, y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=2, validation_split=0.2, callbacks=[checkpointer])
         
         with open(loss_file, 'w') as fout2:
-            fout2.write("epoch;train_loss;val_loss\n")
+            fout2.write("epoch;train_loss;val_loss;params;dataset\n")
             for epoch in range(nb_epoch):
-                fout2.write("%s;%s;%s\n"%(epoch, history.history['loss'][epoch], history.history['val_loss'][epoch]))
+                fout2.write("%s;%s;%s;%s;%s\n"%(epoch, history.history['loss'][epoch], history.history['val_loss'][epoch], "lstmsize%s_dropout%s"%(lstmsize, int(dropout*100)), dataset_name))
         
         
         # load the best weights
@@ -152,7 +166,7 @@ with open(outfile, 'w') as fout:
         
         # test separately for each prefix length
         for nr_events in prefix_lengths:
-            
+            """
             # select only cases that are at least of length nr_events
             relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
             relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
@@ -174,7 +188,10 @@ with open(outfile, 'w') as fout:
             test_X = np.zeros((0,max_len,data_dim))
             for _, group in grouped:
                 test_X = np.concatenate([test_X, pad_sequences(group.as_matrix()[np.newaxis,:,:-2], maxlen=max_len)], axis=0)
-                
+            """
+            test_X = np.load(os.path.join("input_lstm", "%s_%sevents_test_X.npy"%(dataset_name, nr_events)))
+            test_y = np.load(os.path.join("input_lstm", "%s_%sevents_test_y.npy"%(dataset_name, nr_events)))
+            
             # predict    
             preds = model.predict(test_X)
             

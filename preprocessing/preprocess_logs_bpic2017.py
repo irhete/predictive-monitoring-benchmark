@@ -13,12 +13,13 @@ label_col = "label"
 pos_label = "deviant"
 neg_label = "regular"
 
-category_freq_threshold = 10
+#category_freq_threshold = 100
+max_category_levels = 10
 
 # features for classifier
 dynamic_cat_cols = ["Activity", 'Resource', 'Action', 'CreditScore', 'EventOrigin', 'lifecycle:transition'] # i.e. event attributes
 static_cat_cols = ['ApplicationType', 'LoanGoal'] # i.e. case attributes that are known from the start
-dynamic_num_cols = ['FirstWithdrawalAmount', 'MonthlyCost', 'NumberOfTerms', 'OfferedAmount']
+dynamic_num_cols = ['FirstWithdrawalAmount', 'MonthlyCost', 'NumberOfTerms', 'OfferedAmount', "activity_duration"]
 static_num_cols = ['RequestedAmount']
 
 static_cols = static_cat_cols + static_num_cols + [case_id_col, label_col]
@@ -92,9 +93,12 @@ for filename in filenames:
         
     # set infrequent factor levels to "other"
     for col in cat_cols:
-        counts = data[col].value_counts()
-        mask = data[col].isin(counts[counts >= category_freq_threshold].index)
-        data.loc[~mask, col] = "other"
-        
+        if col != activity_col:
+            counts = data[col].value_counts()
+            #mask = data[col].isin(counts[counts >= category_freq_threshold].index)
+            #data.loc[~mask, col] = "other"
+            mask = data[col].isin(counts.index[max_category_levels:])
+            data.loc[mask, col] = "other"
+
     data.to_csv(os.path.join(output_data_folder,filename), sep=";", index=False)
     

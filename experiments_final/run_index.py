@@ -2,14 +2,20 @@ import pandas as pd
 import numpy as np
 import sys
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline, FeatureUnion
+from time import time
+import pickle
+import os
+from sys import argv
+
+sys.path.append("..")
 from transformers.StaticTransformer import StaticTransformer
 from transformers.IndexBasedTransformer import IndexBasedTransformer
 from transformers.IndexBasedExtractor import IndexBasedExtractor
 from transformers.HMMDiscriminativeTransformer import HMMDiscriminativeTransformer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import Pipeline, FeatureUnion
+
 import dataset_confs
-from time import time
 
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
@@ -17,26 +23,29 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
+home_dir = ".."
 
-#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)]
-#datasets = ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)]
-#datasets = ["insurance_activity", "insurance_followup"]
-datasets = ["traffic_fines_f%s"%formula for formula in range(1,4)]
-#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
-#datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["insurance_activity", "insurance_followup"] + ["sepsis_cases"]
-#datasets = ["siae"]
-#datasets = ["sepsis_cases"]
+with open(os.path.join(home_dir, "optimal_params.pickle"), "rb") as fin:
+    best_params = pickle.load(fin)
 
-#outfile = "results/results_index_public.csv"
-#outfile = "results/results_index_bpic2011.csv"
-#outfile = "results/results_index_bpic2015.csv"
-#outfile = "results/results_index_insurance.csv"
-outfile = "results/results_index_traffic_fines.csv"
-#outfile = "results/results_index_siae.csv"
-#outfile = "results/results_all_index_small_logs.csv"
-#outfile = "results/results_index_sepsis.csv"
 
-prefix_lengths = list(range(2,21))
+dataset_ref_to_datasets = {
+    "bpic2011": ["bpic2011_f%s"%formula for formula in range(1,5)],
+    "bpic2015_f1": ["bpic2015_%s_f1"%(municipality) for municipality in range(1,6)],
+    "bpic2015_f2": ["bpic2015_%s_f2"%(municipality) for municipality in range(1,6)],
+    "insurance": ["insurance_activity", "insurance_followup"],
+    "sepsis_cases": ["sepsis_cases"],
+    "traffic_fines": ["traffic_fines"],
+    "siae": ["siae"],
+    "bpic2017": ["bpic2017"]
+}
+    
+
+dataset_ref = argv[1]
+datasets = dataset_ref_to_datasets[dataset_ref]
+outfile = os.path.join(home_dir, "final_results/final_results_index_%s.csv"%dataset_ref)
+
+prefix_lengths = list(range(1,21))
 
 train_ratio = 0.8
 hmm_min_seq_length = 2
@@ -48,8 +57,8 @@ random_state = 22
 fillna = True
 
 methods_dict = {
-    "index": ["static", "index"],
-    "index_hmm_combined": ["static", "index", "hmm_disc"]}
+    "index": ["static", "index"]}#,
+    #"index_hmm_combined": ["static", "index", "hmm_disc"]}
    
     
 ##### MAIN PART ######   
@@ -59,6 +68,8 @@ with open(outfile, 'w') as fout:
     
     for dataset_name in datasets:
         
+        print("Reading dataset...")
+        sys.stdout.flush()
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
         activity_col = dataset_confs.activity_col[dataset_name]
@@ -71,7 +82,7 @@ with open(outfile, 'w') as fout:
         dynamic_num_cols = dataset_confs.dynamic_num_cols[dataset_name]
         static_num_cols = dataset_confs.static_num_cols[dataset_name]
         
-        data_filepath = dataset_confs.filename[dataset_name]
+        data_filepath = os.path.join(home_dir, dataset_confs.filename[dataset_name])
         
         dtypes = {col:"object" for col in dynamic_cat_cols+static_cat_cols+[case_id_col, label_col, timestamp_col]}
         for col in dynamic_num_cols + static_num_cols:
@@ -95,6 +106,8 @@ with open(outfile, 'w') as fout:
         test_y_all = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col).first()[label_col]
         
         # encode all index-based
+        print("Encoding index-based...")
+        sys.stdout.flush()
         index_encoder = IndexBasedTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols,
                                      max_events=prefix_lengths[-1], fillna=fillna)
         
@@ -107,6 +120,8 @@ with open(outfile, 'w') as fout:
         test_index_encode_time_all = time() - start
         
         # encode all static
+        print("Encoding static...")
+        sys.stdout.flush()
         static_transformer = StaticTransformer(case_id_col=case_id_col, cat_cols=static_cat_cols, num_cols=static_num_cols, fillna=fillna)
         
         start = time()
@@ -118,12 +133,17 @@ with open(outfile, 'w') as fout:
         test_encode_time_base = time() - start
         
         for method_name, methods in methods_dict.items():
+            print("Evaluating method %s..."%method_name)
+            sys.stdout.flush()
             
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "train_index_encode_time_all", train_index_encode_time_all))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "test_index_encode_time_all", test_index_encode_time_all))
             
             for nr_events in prefix_lengths:
                 
+                print("Evaluating for %s events..."%nr_events)
+                sys.stdout.flush()
+        
                 # extract appropriate number of events for index-based encoding
                 index_extractor = IndexBasedExtractor(cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, max_events=nr_events, fillna=True)
                 
@@ -164,14 +184,18 @@ with open(outfile, 'w') as fout:
                     del relevant_test_ids
                 
                 # fit classifier
+                print("Fitting classifier...")
+                sys.stdout.flush()
                 start = time()
-                cls = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=random_state)
+                cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=best_params[dataset_name][method_name][nr_events]['rf_max_features'], random_state=random_state)
                 cls.fit(train_X, train_y)
                 cls_fit_time = time() - start
                 preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0] 
                 del train_X
                 
                 # test
+                print("Testing...")
+                sys.stdout.flush()
                 start = time()
                 preds = cls.predict_proba(test_X)[:,preds_pos_label_idx]
                 cls_pred_time = time() - start
