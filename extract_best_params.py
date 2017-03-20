@@ -3,8 +3,12 @@ import pandas as pd
 import os
 import numpy as np
 import pickle
+from sys import argv
 
-files = glob.glob("cv_results/*")
+cv_results_dir = argv[1] # cv_results
+outfile = argv[2] #"optimal_params.pickle"
+
+files = glob.glob("%s/*"%cv_results_dir)
 
 data = pd.read_csv(files[0], sep=";")
 for file in files[1:]:
@@ -13,9 +17,9 @@ for file in files[1:]:
         data = pd.concat([data, tmp], axis=0)
         
 data = data[data.metric=="auc"]
-data["score"][pd.isnull(data["score"])] = 0
-data["score"][data["score"] == "None"] = 0
-data["score"] = data["score"].astype(float)
+#data["score"][pd.isnull(data["score"])] = 0
+#data["score"][data["score"] == "None"] = 0
+#data["score"] = data["score"].astype(float)
 data.fillna(0, inplace=True)
 
 
@@ -56,5 +60,5 @@ for row in data_best_over_all_prefixes[data_best_over_all_prefixes.method.isin([
     best_params[row[0]][row[1]]["n_clusters"] = int(row[3])
     
 
-with open("optimal_params.pickle", "wb") as fout:
+with open(outfile, "wb") as fout:
     pickle.dump(best_params, fout)

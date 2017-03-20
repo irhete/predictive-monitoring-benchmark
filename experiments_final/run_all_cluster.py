@@ -4,6 +4,7 @@ import sys
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.cluster import KMeans
 from time import time
 import pickle
 import os
@@ -12,7 +13,6 @@ from sys import argv
 sys.path.append("..")
 from transformers.StaticTransformer import StaticTransformer
 from transformers.LastStateTransformer import LastStateTransformer
-from transformers.PreviousStateTransformer import PreviousStateTransformer
 from transformers.AggregateTransformer import AggregateTransformer
 from transformers.IndexBasedTransformer import IndexBasedTransformer
 from transformers.HMMDiscriminativeTransformer import HMMDiscriminativeTransformer
@@ -51,28 +51,30 @@ dataset_ref_to_datasets = {
 }
 dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + dataset_ref_to_datasets["bpic2015"] + dataset_ref_to_datasets["insurance"] + dataset_ref_to_datasets["sepsis_cases"]
 
-methods_dict = {
-    "single_laststate": ["static", "laststate"],
-    #"single_last_two_states": ["static", "laststate", "prevstate"],
-    "single_agg": ["static", "agg"],
-    "single_hmm_disc": ["static", "hmm_disc"]}#,
-    #"single_last_two_states_agg": ["static", "laststate", "prevstate", "agg"]}#,
-    #"single_combined": ["static", "laststate", "agg", "hmm_disc"]}
 
+methods_dict = {
+    "cluster_laststate": ["static", "laststate"],
+    "cluster_agg": ["static", "agg"]}#,
+    #"cluster_hmm_disc": ["static", "hmm_disc"],
+    #"cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
+    
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
 methods = methods_dict[method_name]
 
 outfile = os.path.join(home_dir, results_dir, "final_results_%s_%s.csv"%(method_name, dataset_ref)) 
 
+    
 train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
-hmm_n_iter = 50
-hmm_n_states = 8
+hmm_n_iter = 30
+hmm_n_states = 6
 rf_n_estimators = 500
-rf_max_features = 0.25#None # assigned on the fly from the best params
 random_state = 22
+rf_max_features = None # assigned on the fly from the best params
+n_clusters = None # assigned on the fly from the best params
 fillna = True
+
 
 
 def init_encoder(method):
@@ -83,9 +85,6 @@ def init_encoder(method):
     elif method == "laststate":
         return LastStateTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
     
-    elif method == "prevstate":
-        return PreviousStateTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
-    
     elif method == "agg":
         return AggregateTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
     
@@ -95,6 +94,7 @@ def init_encoder(method):
                                                         pos_label=pos_label, min_seq_length=hmm_min_seq_length,
                                                         max_seq_length=hmm_max_seq_length, random_state=random_state,
                                                         n_iter=hmm_n_iter, fillna=fillna)
+        hmm_disc_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_disc_encoder
     
     elif method == "hmm_gen":
@@ -102,6 +102,7 @@ def init_encoder(method):
                                                    num_cols=dynamic_num_cols, n_states=hmm_n_states,
                                                    min_seq_length=hmm_min_seq_length, max_seq_length=hmm_max_seq_length,
                                                    random_state=random_state, n_iter=hmm_n_iter, fillna=fillna)
+        hmm_gen_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_gen_encoder
     
     else:
@@ -115,8 +116,7 @@ with open(outfile, 'w') as fout:
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name in datasets:
-        print("Started...")
-        sys.stdout.flush()
+        
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
         activity_col = dataset_confs.activity_col[dataset_name]
@@ -130,26 +130,21 @@ with open(outfile, 'w') as fout:
         static_num_cols = dataset_confs.static_num_cols[dataset_name]
         
         data_filepath = os.path.join(home_dir, dataset_confs.filename[dataset_name])
-        
-        # specify data types
+
         dtypes = {col:"object" for col in dynamic_cat_cols+static_cat_cols+[case_id_col, label_col, timestamp_col]}
         for col in dynamic_num_cols + static_num_cols:
             dtypes[col] = "float"
-
-        # read data
-        print("Reading...")
-        sys.stdout.flush()
+        
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
         
         # maximum prefix length considered can't be larger than the 75th quantile
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
-        
-        print("Splitting...")
-        sys.stdout.flush()
+
         # split into train and test using temporal split
-        start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
+        grouped = data.groupby(case_id_col)
+        start_timestamps = grouped[timestamp_col].min().reset_index()
         start_timestamps.sort_values(timestamp_col, ascending=1, inplace=True)
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
         train = data[data[case_id_col].isin(train_ids)]
@@ -160,65 +155,97 @@ with open(outfile, 'w') as fout:
 
         grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
-        test_case_lengths = test.groupby(case_id_col).size()
+        test_case_lengths = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
 
         # generate prefix data (each possible prefix becomes a trace)
         print("Generating prefix data...")
-        sys.stdout.flush()
         train_prefixes = grouped_train.head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
             tmp = grouped_train.head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-        del grouped_train
+        del grouped_train 
         
         
-        #rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
+        rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
+        n_clusters = best_params[dataset_name][method_name]['n_clusters']
 
-        cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=rf_max_features, random_state=random_state)
-        feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])
-        pipeline = Pipeline([('encoder', feature_combiner), ('cls', cls)])
-
-        # fit pipeline
-        train_y = train_prefixes.groupby(case_id_col).first()[label_col]
-
-        print("Fitting pipeline...")
-        sys.stdout.flush()
+        # cluster prefixes based on control flow
+        print("Clustering prefixes...")
         start = time()
-        pipeline.fit(train_prefixes, train_y)
-        pipeline_fit_time = time() - start
+        freq_encoder = AggregateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
+        data_freqs = freq_encoder.fit_transform(train_prefixes)
+        clustering = KMeans(n_clusters, random_state=random_state)
+        cluster_assignments = clustering.fit_predict(data_freqs)
+        clustering_time = time() - start
             
-        preds_pos_label_idx = np.where(pipeline.named_steps["cls"].classes_ == pos_label)[0][0] 
+        pipelines = {}
 
-        # get training times
-        train_encoding_fit_time = sum([el[1].fit_time for el in pipeline.named_steps["encoder"].transformer_list])
-        train_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
-        cls_fit_time = pipeline_fit_time - train_encoding_fit_time - train_encoding_transform_time
+        start = time()
+        # train and fit pipeline for each cluster
+        for cl in range(n_clusters):
+            print("Fitting pipeline for cluster %s..."%cl)
+            relevant_cases = data_freqs[cluster_assignments == cl].index
 
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "cls_fit_time", cls_fit_time))
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_fit_time", train_encoding_fit_time))
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_transform_time_train", train_encoding_transform_time))
+            if len(relevant_cases) == 0:
+                continue
+            
+            cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=rf_max_features, random_state=random_state)
+            feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])
+            pipelines[cl] = Pipeline([('encoder', feature_combiner), ('cls', cls)])
+
+            # fit pipeline
+            dt_train_cluster = train_prefixes[train_prefixes[case_id_col].isin(relevant_cases)].sort_values(timestamp_col, ascending=True)
+            train_y = dt_train_cluster.groupby(case_id_col).first()[label_col]
+            pipelines[cl].fit(dt_train_cluster, train_y)
+        total_encoding_cls_time = time() - start
+
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "clustering_time", clustering_time))
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "total_encoding_cls_time", total_encoding_cls_time))
         
         # test separately for each prefix length
         for nr_events in prefix_lengths:
-                
+            print("Predicting for %s events..."%nr_events)
+
             # select only cases that are at least of length nr_events
             relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
             if len(relevant_case_ids) == 0:
                 break
-            relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
+            relevant_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True)
+                
             del relevant_case_ids
-            test_y = [1 if label==pos_label else 0 for label in relevant_grouped_test.first()[label_col]]
-            
-            # predict
-            print("Predicting for %s events..."%nr_events)
-            sys.stdout.flush()
+                    
             start = time()
-            preds = pipeline.predict_proba(relevant_grouped_test.head(nr_events))[:,preds_pos_label_idx]
-            pipeline_pred_time = time() - start
-            del relevant_grouped_test
-            test_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
-            cls_pred_time = pipeline_pred_time - test_encoding_transform_time
+            # get predicted cluster for each test case
+            test_data_freqs = freq_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
+            test_cluster_assignments = clustering.predict(test_data_freqs)
+
+            # use appropriate classifier for each bucket of test cases
+            preds = []
+            test_y = []
+            for cl in range(n_clusters):
+                current_cluster_case_ids = test_data_freqs[test_cluster_assignments == cl].index
+                current_cluster_grouped_test = relevant_test[relevant_test[case_id_col].isin(current_cluster_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
+                    
+                if len(current_cluster_case_ids) == 0:
+                    continue
+                elif cl not in pipelines:
+                    # no classifier exists for this cluster, hardcode predictions
+                    current_cluster_preds = [0.5] * len(current_cluster_case_ids)
+                elif len(pipelines[cl].named_steps["cls"].classes_) == 1:
+                    hardcoded_prediction = 1 if pipelines[cl].named_steps["cls"].classes_[0] == pos_label else 0
+                    current_cluster_preds = [hardcoded_prediction] * len(current_cluster_case_ids)
+                else:
+                    # make predictions
+                    preds_pos_label_idx = np.where(pipelines[cl].named_steps["cls"].classes_ == pos_label)[0][0] 
+                    current_cluster_preds = pipelines[cl].predict_proba(current_cluster_grouped_test.head(nr_events))[:,preds_pos_label_idx]
+                        
+                preds.extend(current_cluster_preds)
+
+                # extract actual label values
+                current_cluster_test_y = [1 if label==pos_label else 0 for label in current_cluster_grouped_test.first()[label_col]]
+                test_y.extend(current_cluster_test_y)
+            total_prediction_time = time() - start
 
             if len(set(test_y)) < 2:
                 auc = None
@@ -230,9 +257,6 @@ with open(outfile, 'w') as fout:
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_predict_time", cls_pred_time))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "encoder_transform_time_test", test_encoding_transform_time))
+            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "total_prediction_time", total_prediction_time))
                 
         print("\n")
-                
-                
