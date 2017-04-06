@@ -77,8 +77,12 @@ class HMMDiscriminativeTransformer(TransformerMixin):
         grouped = X.groupby(self.case_id_col)
         hmms = {}
         encoders = {}
+        
+        if len(grouped) < self.n_states:
+            self.n_states = len(grouped)
 
         for col in self.cat_cols + self.num_cols:
+            
             tmp_dt_hmm = []
             for name, group in grouped:
                 if len(group) >= self.min_seq_length:
@@ -92,17 +96,19 @@ class HMMDiscriminativeTransformer(TransformerMixin):
                 tmp_dt_hmm = [encoders[col][label] for label in tmp_dt_hmm]
                 
             else:
-                hmms[col] = hmm.GaussianHMM(n_components=self.n_states, random_state=self.random_state, n_iter=self.n_iter)
-                
-            hmms[col] = hmms[col].fit(np.atleast_2d(tmp_dt_hmm).T, [min(val, self.max_seq_length) for val in grouped.size() if val >= self.min_seq_length])
-            
+                hmms[col] = hmm.GaussianHMM(n_components=self.n_states, random_state=self.random_state, n_iter=self.n_iter, params=set(tmp_dt_hmm))
+            sizes = [min(val, self.max_seq_length) for val in grouped.size() if val >= self.min_seq_length]
+            inputd = np.atleast_2d(tmp_dt_hmm).T
+            start = time()    
+            hmms[col] = hmms[col].fit(inputd, sizes)
+            print("%s: %s"%(col, time()-start))
             # fix buggy transition matrices
             rowsums = hmms[col].transmat_.sum(axis=1)
             if rowsums.sum() < len(rowsums):
                 for problem_row_idx in np.where(rowsums < 1)[0]:
                     hmms[col].transmat_[problem_row_idx] = 1.0 / hmms[col].transmat_.shape[1]
                 
-
+            
         return (hmms, encoders)
     
     

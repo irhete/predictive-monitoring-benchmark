@@ -27,8 +27,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 home_dir = ".."
-results_dir = "final_results2"
-optimal_params_filename = "optimal_params.pickle"
+results_dir = "final_results3"
+optimal_params_filename = "optimal_params3.pickle"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
@@ -54,8 +54,8 @@ dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + da
 
 methods_dict = {
     "cluster_laststate": ["static", "laststate"],
-    "cluster_agg": ["static", "agg"]}#,
-    #"cluster_hmm_disc": ["static", "hmm_disc"],
+    "cluster_agg": ["static", "agg"],
+    "cluster_hmm": ["static", "hmm_disc"]}
     #"cluster_combined": ["static", "laststate", "agg", "hmm_disc"]}
     
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
@@ -67,8 +67,8 @@ outfile = os.path.join(home_dir, results_dir, "final_results_%s_%s.csv"%(method_
 train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
-hmm_n_iter = 30
-hmm_n_states = 6
+hmm_n_iter = 50
+hmm_n_states = None # assigned on the fly from the best params
 rf_n_estimators = 500
 random_state = 22
 rf_max_features = None # assigned on the fly from the best params
@@ -94,7 +94,6 @@ def init_encoder(method):
                                                         pos_label=pos_label, min_seq_length=hmm_min_seq_length,
                                                         max_seq_length=hmm_max_seq_length, random_state=random_state,
                                                         n_iter=hmm_n_iter, fillna=fillna)
-        hmm_disc_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_disc_encoder
     
     elif method == "hmm_gen":
@@ -102,7 +101,6 @@ def init_encoder(method):
                                                    num_cols=dynamic_num_cols, n_states=hmm_n_states,
                                                    min_seq_length=hmm_min_seq_length, max_seq_length=hmm_max_seq_length,
                                                    random_state=random_state, n_iter=hmm_n_iter, fillna=fillna)
-        hmm_gen_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_gen_encoder
     
     else:
@@ -138,35 +136,38 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
         
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
 
         # split into train and test using temporal split
         grouped = data.groupby(case_id_col)
         start_timestamps = grouped[timestamp_col].min().reset_index()
         start_timestamps.sort_values(timestamp_col, ascending=1, inplace=True)
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
-        train = data[data[case_id_col].isin(train_ids)]
-        test = data[~data[case_id_col].isin(train_ids)]
+        train = data[data[case_id_col].isin(train_ids)].sort_values(timestamp_col, ascending=True)
+        test = data[~data[case_id_col].isin(train_ids)].sort_values(timestamp_col, ascending=True)
         del data
         del start_timestamps
         del train_ids
-
-        grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
-        test_case_lengths = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
+        train['case_length'] = train.groupby(case_id_col)[activity_col].transform(len)
+
+        test_case_lengths = test.groupby(case_id_col).size()
 
         # generate prefix data (each possible prefix becomes a trace)
         print("Generating prefix data...")
-        train_prefixes = grouped_train.head(prefix_lengths[0])
+        sys.stdout.flush()
+        train_prefixes = train[train['case_length'] >= prefix_lengths[0]].groupby(case_id_col).head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
-            tmp = grouped_train.head(nr_events)
+            tmp = train[train['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-        del grouped_train 
         
-        
+        if dataset_name not in best_params or method_name not in best_params[dataset_name]:
+            continue
+        hmm_n_states = best_params[dataset_name][method_name]['hmm_n_states']
         rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
         n_clusters = best_params[dataset_name][method_name]['n_clusters']
 

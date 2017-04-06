@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 dataset_ref = argv[1]
 method_name = argv[2]
+results_dir = argv[3]
 
 dataset_ref_to_datasets = {
     "bpic2011": ["bpic2011_f%s"%formula for formula in range(1,5)],
@@ -42,10 +43,9 @@ dataset_ref_to_datasets = {
 dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + dataset_ref_to_datasets["bpic2015"] + dataset_ref_to_datasets["insurance"] + dataset_ref_to_datasets["sepsis_cases"]
 
 home_dir = ".."
-results_dir = "cv_results2"
 
 methods_dict = {
-    "index_index": ["static", "index"],
+    "index": ["static", "index"], # slow here. faster version in run_index_orig.py
     "index_laststate": ["static", "laststate"],
     "index_agg": ["static", "agg"],
     "index_hmm": ["static", "hmm_disc"]}
@@ -57,7 +57,7 @@ train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
 hmm_n_iter = 50
-hmm_n_statess = [0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
+hmm_n_statess = [2]#[0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
 rf_n_estimators = 500
 rf_max_featuress = ["sqrt", 0.05, 0.1, 0.25, 0.5, 0.75]
 random_state = 22
@@ -131,10 +131,10 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
 
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
-        prefix_lengths = range(2,3)
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
 
         # split into train and test using temporal split
         start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
@@ -159,29 +159,7 @@ with open(outfile, 'w') as fout:
             train_chunk = train[train[case_id_col].isin(current_train_names)]
             test_chunk = train[~train[case_id_col].isin(current_train_names)]
 
-            grouped_train = train_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-            grouped_test = test_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-
-            # generate prefix data (each possible prefix becomes a trace)
-            print("Generating prefix data...")
-            train_prefixes = grouped_train.head(prefix_lengths[0])
-            for nr_events in prefix_lengths[1:]:
-                tmp = grouped_train.head(nr_events)
-                tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
-                train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-            del grouped_train 
-
-            print("Generating test prefix data...")
-            test_prefixes = grouped_test.head(prefix_lengths[0])
-            for nr_events in prefix_lengths[1:]:
-                tmp = grouped_test.head(nr_events)
-                tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
-                test_prefixes = pd.concat([test_prefixes, tmp], axis=0)
-            del grouped_test 
-
-            train_case_lengths = train_prefixes.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
-            test_case_lengths = test_prefixes.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
-
+            test_case_lengths = test_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
 
             for hmm_n_states in hmm_n_statess:
                 print("Starting HMM with %s states..."%hmm_n_states)
@@ -193,21 +171,16 @@ with open(outfile, 'w') as fout:
                     sys.stdout.flush()
                     
                     #### SELECT RELEVANT CASES ####
-                    relevant_train_case_names = train_case_lengths[train_case_lengths == nr_events].index
-                    relevant_test_case_names = test_case_lengths[test_case_lengths == nr_events].index
+                    relevant_test_case_names = test_case_lengths.index[test_case_lengths >= nr_events]
 
                     if len(relevant_test_case_names) == 0:
                         continue
-                    elif len(relevant_train_case_names) == 0:
-                        preds = [0.5] * len(relevant_test_case_names)
-                        continue
                         
-                    dt_train = train_prefixes[train_prefixes[case_id_col].isin(relevant_train_case_names)].sort_values(timestamp_col, ascending=True)
-                    del relevant_train_case_names
+                    # training set contains as many traces as are in the original log. shorter ones contain imputed values. 
+                    dt_train = train_chunk.sort_values(timestamp_col, ascending=1).groupby(case_id_col).head(nr_events)
                     train_y = dt_train.groupby(case_id_col).first()[label_col]
-                    
-                    dt_test = test_prefixes[test_prefixes[case_id_col].isin(relevant_test_case_names)].sort_values(timestamp_col, ascending=True)
-                    del relevant_test_case_names
+
+                    dt_test = test_chunk[test_chunk[case_id_col].isin(relevant_test_case_names)].sort_values(timestamp_col, ascending=1).groupby(case_id_col).head(nr_events)
                     test_y = [1 if label==pos_label else 0 for label in dt_test.groupby(case_id_col).first()[label_col]]
                     
                     #### ENCODE DATA ####

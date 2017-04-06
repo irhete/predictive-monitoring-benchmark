@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 dataset_ref = argv[1]
 method_name = argv[2]
+results_dir = argv[3]
 
 dataset_ref_to_datasets = {
     "bpic2011": ["bpic2011_f%s"%formula for formula in range(1,5)],
@@ -44,7 +45,6 @@ dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + da
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
 
 home_dir = ".."
-results_dir = "cv_results2"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
@@ -62,7 +62,7 @@ train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
 hmm_n_iter = 50
-hmm_n_statess = [0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
+hmm_n_statess = [2]#[0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
 rf_n_estimators = 500
 rf_max_featuress = ["sqrt", 0.05, 0.1, 0.25, 0.5, 0.75]
 random_state = 22
@@ -109,6 +109,8 @@ with open(outfile, 'w') as fout:
     fout.write("%s;%s;%s;%s;%s;%s;%s;%s\n"%("part", "dataset", "method", "rf_max_features", "n_clusters", "hmm_n_states", "metric", "score"))
 
     for dataset_name in datasets:
+        print("Dataset %s..."%dataset_name)
+        sys.stdout.flush()
 
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
@@ -131,9 +133,10 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
 
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
 
         # split into train and test using temporal split
         start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
@@ -155,37 +158,41 @@ with open(outfile, 'w') as fout:
 
             # create train and validation data according to current fold
             current_train_names = grouped_train_firsts[case_id_col][train_index]
-            train_chunk = train[train[case_id_col].isin(current_train_names)]
-            test_chunk = train[~train[case_id_col].isin(current_train_names)]
+            train_chunk = train[train[case_id_col].isin(current_train_names)].sort_values(timestamp_col, ascending=True)
+            test_chunk = train[~train[case_id_col].isin(current_train_names)].sort_values(timestamp_col, ascending=True)
+            
+            train_chunk['case_length'] = train_chunk.groupby(case_id_col)[activity_col].transform(len)
+            test_chunk['case_length'] = test_chunk.groupby(case_id_col)[activity_col].transform(len)
 
-            grouped_train = train_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-            grouped_test = test_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
             test_case_lengths = test_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
 
-            # generate prefix data (each possible prefix becomes a trace)
-            print("Generating prefix data...")
-            train_prefixes = grouped_train.head(prefix_lengths[0])
+            train_prefixes = train_chunk[train_chunk['case_length'] >= prefix_lengths[0]].sort_values(timestamp_col, ascending=True).groupby(case_id_col).head(prefix_lengths[0])
+            train_prefixes[case_id_col] = train_prefixes[case_id_col].apply(lambda x: "%s_%s"%(x, prefix_lengths[0]))
             for nr_events in prefix_lengths[1:]:
-                tmp = grouped_train.head(nr_events)
+                tmp = train_chunk[train_chunk['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
                 tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
                 train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-            del grouped_train 
-            
+            print(time() - start)
+            sys.stdout.flush()
+
             # generate prefix data for testing (each possible prefix becomes a trace)
             print("Generating test prefix data...")
             sys.stdout.flush()
-            test_prefixes = grouped_test.head(prefix_lengths[0])
+            start = time()
+            test_prefixes = test_chunk[test_chunk['case_length'] >= prefix_lengths[0]].sort_values(timestamp_col, ascending=True).groupby(case_id_col).head(prefix_lengths[0])
+            test_prefixes[case_id_col] = test_prefixes[case_id_col].apply(lambda x: "%s_%s"%(x, prefix_lengths[0]))
             for nr_events in prefix_lengths[1:]:
-                tmp = grouped_test.head(nr_events)
+                tmp = test_chunk[test_chunk['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
                 tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
                 test_prefixes = pd.concat([test_prefixes, tmp], axis=0)
-
+            print(time() - start)
+            sys.stdout.flush()
+            
                 test_y = [1 if label==pos_label else 0 for label in test_prefixes.groupby(case_id_col).first()[label_col]]
-            del grouped_test
 
             for n_clusters in n_clusterss:
                 # cluster prefixes based on control flow
-                print("Clustering prefixes...")
+                print("Clustering prefixes into %s clusters..."%n_clusters)
                 start = time()
                 freq_encoder = AggregateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
                 data_freqs = freq_encoder.fit_transform(train_prefixes)
@@ -226,7 +233,6 @@ with open(outfile, 'w') as fout:
                                 del relevant_train_cases
 
                                 dt_test_cluster = test_prefixes[test_prefixes[case_id_col].isin(relevant_test_cases)].sort_values(timestamp_col, ascending=True)
-                                del relevant_test_cases
 
                                 #### ENCODE DATA ####
                                 if cl not in feature_combiners:
@@ -245,10 +251,17 @@ with open(outfile, 'w') as fout:
                                 cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=rf_max_features, random_state=random_state)
                                 cls.fit(dt_train, train_y)
 
-                                # make predictions
-                                preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0] 
-                                current_cluster_preds = cls.predict_proba(dt_test)[:,preds_pos_label_idx]
-
+                                #### PREDICT ####
+                                start = time()
+                                if len(train_y.unique()) == 1:
+                                    hardcoded_prediction = 1 if train_y[0] == pos_label else 0
+                                    current_cluster_preds = [hardcoded_prediction] * len(relevant_test_cases)
+                                else:
+                                    # make predictions
+                                    preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0] 
+                                    current_cluster_preds = cls.predict_proba(dt_test)[:,preds_pos_label_idx]
+                                prediction_time = time() - start
+                    
                                 
                             preds.extend(current_cluster_preds)
 

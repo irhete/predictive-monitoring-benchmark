@@ -27,8 +27,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 home_dir = ".."
-results_dir = "final_results2"
-optimal_params_filename = "optimal_params.pickle"
+results_dir = "final_results3"
+optimal_params_filename = "optimal_params3.pickle"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
@@ -53,8 +53,10 @@ dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + da
 
 
 methods_dict = {
+    "index": ["static", "index"], # slow here. faster version in run_index_orig.py
     "index_laststate": ["static", "laststate"],
-    "index_agg": ["static", "agg"]}
+    "index_agg": ["static", "agg"],
+    "index_hmm": ["static", "hmm_disc"]}
     
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
 methods = methods_dict[method_name]
@@ -65,8 +67,8 @@ outfile = os.path.join(home_dir, results_dir, "final_results_%s_%s.csv"%(method_
 train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
-hmm_n_iter = 30
-hmm_n_states = 6
+hmm_n_iter = 50
+hmm_n_states = None # assigned on the fly from the best params
 rf_n_estimators = 500
 random_state = 22
 rf_max_features = None # assigned on the fly from the best params
@@ -91,15 +93,16 @@ def init_encoder(method):
                                                         pos_label=pos_label, min_seq_length=hmm_min_seq_length,
                                                         max_seq_length=hmm_max_seq_length, random_state=random_state,
                                                         n_iter=hmm_n_iter, fillna=fillna)
-        hmm_disc_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_disc_encoder
+        
+    elif method == "index":
+        return IndexBasedTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
     
     elif method == "hmm_gen":
         hmm_gen_encoder = HMMGenerativeTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols,
                                                    num_cols=dynamic_num_cols, n_states=hmm_n_states,
                                                    min_seq_length=hmm_min_seq_length, max_seq_length=hmm_max_seq_length,
                                                    random_state=random_state, n_iter=hmm_n_iter, fillna=fillna)
-        hmm_gen_encoder.fit(train.sort_values(timestamp_col, ascending=True))
         return hmm_gen_encoder
     
     else:
@@ -135,9 +138,10 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
         
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
 
         # split into train and test using temporal split
         grouped = data.groupby(case_id_col)
@@ -149,45 +153,24 @@ with open(outfile, 'w') as fout:
         del data
         del start_timestamps
         del train_ids
-
-        grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-        grouped_test = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
-        # generate prefix data (each possible prefix becomes a trace)
-        print("Generating prefix data...")
-        train_prefixes = grouped_train.head(prefix_lengths[0])
-        for nr_events in prefix_lengths[1:]:
-            tmp = grouped_train.head(nr_events)
-            tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
-            train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-        del grouped_train 
+        test_case_lengths = test.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
         
-        print("Generating test prefix data...")
-        test_prefixes = grouped_test.head(prefix_lengths[0])
-        for nr_events in prefix_lengths[1:]:
-            tmp = grouped_test.head(nr_events)
-            tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
-            test_prefixes = pd.concat([test_prefixes, tmp], axis=0)
-        del grouped_test 
-        
-        train_case_lengths = train_prefixes.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
-        test_case_lengths = test_prefixes.sort_values(timestamp_col, ascending=True).groupby(case_id_col).size()
-        
-        rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
-
         # test separately for each prefix length
         for nr_events in prefix_lengths:
+            if dataset_name not in best_params or method_name not in best_params[dataset_name] or nr_events not in best_params[dataset_name][method_name]:
+                continue
+            hmm_n_states = best_params[dataset_name][method_name][nr_events]['hmm_n_states']
+            rf_max_features = best_params[dataset_name][method_name][nr_events]['rf_max_features']
             
             #### SELECT RELEVANT CASES ####
             print("Selecting relevant cases for %s events..."%nr_events)
             sys.stdout.flush()
-            relevant_train_case_names = train_case_lengths[train_case_lengths == nr_events].index
-            relevant_test_case_names = test_case_lengths[test_case_lengths == nr_events].index
+            
+            # discard traces shorter than current prefix length from the test set
+            relevant_test_case_names = test_case_lengths.index[test_case_lengths >= nr_events]
 
             if len(relevant_test_case_names) == 0:
-                continue
-            elif len(relevant_train_case_names) == 0:
-                preds = [0.5] * len(relevant_test_case_names)
                 continue
                 
             
@@ -198,10 +181,11 @@ with open(outfile, 'w') as fout:
             feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])
             pipeline = Pipeline([('encoder', feature_combiner), ('cls', cls)])
             
-            start = time()
-            dt_train = train_prefixes[train_prefixes[case_id_col].isin(relevant_train_case_names)].sort_values(timestamp_col, ascending=True)
-            del relevant_train_case_names
+            # training set contains as many traces as are in the original log. shorter ones contain imputed values. 
+            dt_train = train.sort_values(timestamp_col, ascending=1).groupby(case_id_col).head(nr_events)
             train_y = dt_train.groupby(case_id_col).first()[label_col]
+            
+            start = time()
             pipeline.fit(dt_train, train_y)
             fit_time = time() - start
             
@@ -211,14 +195,13 @@ with open(outfile, 'w') as fout:
             #### PREDICT ####
             print("Predicting for %s events..."%nr_events)
             sys.stdout.flush()
-            dt_test = test_prefixes[test_prefixes[case_id_col].isin(relevant_test_case_names)].sort_values(timestamp_col, ascending=True)
-            del relevant_test_case_names
+            dt_test = test[test[case_id_col].isin(relevant_test_case_names)].sort_values(timestamp_col, ascending=1).groupby(case_id_col).head(nr_events)
             test_y = [1 if label==pos_label else 0 for label in dt_test.groupby(case_id_col).first()[label_col]]
                 
             start = time()
             if len(pipeline.named_steps["cls"].classes_) == 1:
                 hardcoded_prediction = 1 if pipeline.named_steps["cls"].classes_[0] == pos_label else 0
-                preds = [hardcoded_prediction] * len(current_cluster_case_ids)
+                preds = [hardcoded_prediction] * len(relevant_test_case_names)
             else:
                 # make predictions
                 preds_pos_label_idx = np.where(pipeline.named_steps["cls"].classes_ == pos_label)[0][0] 

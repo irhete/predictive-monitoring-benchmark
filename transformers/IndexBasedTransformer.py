@@ -5,12 +5,14 @@ from time import time
 
 class IndexBasedTransformer(TransformerMixin):
     
-    def __init__(self, case_id_col, cat_cols, num_cols, max_events=None, fillna=True):
+    def __init__(self, case_id_col, cat_cols, num_cols, max_events=None, fillna=True, create_dummies=True):
         self.case_id_col = case_id_col
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         self.max_events = max_events
         self.fillna = fillna
+        self.create_dummies = create_dummies
+        
         self.columns = None
         
         self.fit_time = 0
@@ -37,9 +39,9 @@ class IndexBasedTransformer(TransformerMixin):
         dt_transformed.index = dt_transformed[self.case_id_col]
         
         # one-hot-encode cat cols
-        all_cat_cols = ["%s_%s"%(col, i) for col in self.cat_cols for i in range(self.max_events)]
-        dt_transformed = pd.get_dummies(dt_transformed, columns=all_cat_cols).drop(self.case_id_col, axis=1)
-        
+        if self.create_dummies:
+            all_cat_cols = ["%s_%s"%(col, i) for col in self.cat_cols for i in range(self.max_events)]
+            dt_transformed = pd.get_dummies(dt_transformed, columns=all_cat_cols).drop(self.case_id_col, axis=1)
         
         # fill missing values with 0-s
         if self.fillna:

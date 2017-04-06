@@ -27,8 +27,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 home_dir = ".."
-results_dir = "final_results2"
-optimal_params_filename = "optimal_params.pickle"
+results_dir = "final_results3"
+optimal_params_filename = "optimal_params3.pickle"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
@@ -55,8 +55,9 @@ methods_dict = {
     "single_laststate": ["static", "laststate"],
     #"single_last_two_states": ["static", "laststate", "prevstate"],
     "single_agg": ["static", "agg"],
-    "single_hmm_disc": ["static", "hmm_disc"]}#,
-    #"single_last_two_states_agg": ["static", "laststate", "prevstate", "agg"]}#,
+    "single_index": ["static", "index"],
+    "single_hmm": ["static", "hmm_disc"],
+    "single_last_two_states_agg": ["static", "laststate", "prevstate", "agg"]}#,
     #"single_combined": ["static", "laststate", "agg", "hmm_disc"]}
 
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
@@ -68,9 +69,9 @@ train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
 hmm_n_iter = 50
-hmm_n_states = 8
+hmm_n_states = None # assigned on the fly from the best params
 rf_n_estimators = 500
-rf_max_features = 0.25#None # assigned on the fly from the best params
+rf_max_features = None # assigned on the fly from the best params
 random_state = 22
 fillna = True
 
@@ -96,6 +97,9 @@ def init_encoder(method):
                                                         max_seq_length=hmm_max_seq_length, random_state=random_state,
                                                         n_iter=hmm_n_iter, fillna=fillna)
         return hmm_disc_encoder
+    
+    elif method == "index":
+        return IndexBasedTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
     
     elif method == "hmm_gen":
         hmm_gen_encoder = HMMGenerativeTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols,
@@ -142,9 +146,10 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
         
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
         
         print("Splitting...")
         sys.stdout.flush()
@@ -152,28 +157,30 @@ with open(outfile, 'w') as fout:
         start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
         start_timestamps.sort_values(timestamp_col, ascending=1, inplace=True)
         train_ids = list(start_timestamps[case_id_col])[:int(train_ratio*len(start_timestamps))]
-        train = data[data[case_id_col].isin(train_ids)]
-        test = data[~data[case_id_col].isin(train_ids)]
+        train = data[data[case_id_col].isin(train_ids)].sort_values(timestamp_col, ascending=True)
+        test = data[~data[case_id_col].isin(train_ids)].sort_values(timestamp_col, ascending=True)
         del data
         del start_timestamps
         del train_ids
-
-        grouped_train = train.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
         
+        train['case_length'] = train.groupby(case_id_col)[activity_col].transform(len)
+
         test_case_lengths = test.groupby(case_id_col).size()
 
         # generate prefix data (each possible prefix becomes a trace)
         print("Generating prefix data...")
         sys.stdout.flush()
-        train_prefixes = grouped_train.head(prefix_lengths[0])
+        train_prefixes = train[train['case_length'] >= prefix_lengths[0]].groupby(case_id_col).head(prefix_lengths[0])
         for nr_events in prefix_lengths[1:]:
-            tmp = grouped_train.head(nr_events)
+            tmp = train[train['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
             tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-        del grouped_train
         
         
-        #rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
+        if dataset_name not in best_params or method_name not in best_params[dataset_name]:
+            continue
+        rf_max_features = best_params[dataset_name][method_name]['rf_max_features']
+        hmm_n_states = best_params[dataset_name][method_name]['hmm_n_states']
 
         cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=rf_max_features, random_state=random_state)
         feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])

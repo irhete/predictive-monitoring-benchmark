@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 dataset_ref = argv[1]
 method_name = argv[2]
+results_dir = argv[3]
 
 dataset_ref_to_datasets = {
     "bpic2011": ["bpic2011_f%s"%formula for formula in range(1,5)],
@@ -44,12 +45,12 @@ dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + da
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
 
 home_dir = ".."
-results_dir = "cv_results2"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
 
 methods_dict = {
+    "single_index": ["static", "index"],
     "single_laststate": ["static", "laststate"],
     "single_last_two_states": ["static", "laststate", "prevstate"],
     "single_agg": ["static", "agg"],
@@ -66,7 +67,7 @@ train_ratio = 0.8
 hmm_min_seq_length = 2
 hmm_max_seq_length = None
 hmm_n_iter = 50
-hmm_n_statess = [0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
+hmm_n_statess = [2]#[0] if "hmm_disc" not in methods else [1, 2, 3, 4, 6, 8, 10]
 rf_n_estimators = 500
 rf_max_featuress = ["sqrt", 0.05, 0.1, 0.25, 0.5, 0.75]
 random_state = 22
@@ -87,7 +88,8 @@ def init_encoder(method):
     
     elif method == "agg":
         return AggregateTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
-    
+    elif method == "index":
+        return IndexBasedTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols, num_cols=dynamic_num_cols, fillna=fillna)
     elif method == "hmm_disc":
         hmm_disc_encoder = HMMDiscriminativeTransformer(case_id_col=case_id_col, cat_cols=dynamic_cat_cols,
                                                         num_cols=dynamic_num_cols, n_states=hmm_n_states, label_col=label_col,
@@ -141,9 +143,10 @@ with open(outfile, 'w') as fout:
         data = pd.read_csv(data_filepath, sep=";", dtype=dtypes)
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
 
-        # maximum prefix length considered can't be larger than the 75th quantile
+        # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
         prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
 
         print("Splitting...")
         sys.stdout.flush()
@@ -167,35 +170,29 @@ with open(outfile, 'w') as fout:
 
             # create train and validation data according to current fold
             current_train_names = grouped_train_firsts[case_id_col][train_index]
-            train_chunk = train[train[case_id_col].isin(current_train_names)]
-            test_chunk = train[~train[case_id_col].isin(current_train_names)]
+            train_chunk = train[train[case_id_col].isin(current_train_names)].sort_values(timestamp_col, ascending=True)
+            test_chunk = train[~train[case_id_col].isin(current_train_names)].sort_values(timestamp_col, ascending=True)
 
-            grouped_train = train_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-            grouped_test = test_chunk.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+            train_chunk['case_length'] = train_chunk.groupby(case_id_col)[activity_col].transform(len)
+            test_chunk['case_length'] = test_chunk.groupby(case_id_col)[activity_col].transform(len)
 
-            # generate prefix data (each possible prefix becomes a trace)
-            print("Generating prefix data...")
-            sys.stdout.flush()
-            start = time()
-            train_prefixes = grouped_train.head(prefix_lengths[0])
+            train_prefixes = train_chunk[train_chunk['case_length'] >= prefix_lengths[0]].groupby(case_id_col).head(prefix_lengths[0])
+            train_prefixes[case_id_col] = train_prefixes[case_id_col].apply(lambda x: "%s_%s"%(x, prefix_lengths[0]))
             for nr_events in prefix_lengths[1:]:
-                tmp = grouped_train.head(nr_events)
+                tmp = train_chunk[train_chunk['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
                 tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
                 train_prefixes = pd.concat([train_prefixes, tmp], axis=0)
-            del grouped_train
-            print(time() - start)
-            sys.stdout.flush()
 
             # generate prefix data for testing (each possible prefix becomes a trace)
             print("Generating test prefix data...")
             sys.stdout.flush()
             start = time()
-            test_prefixes = grouped_test.head(prefix_lengths[0])
+            test_prefixes = test_chunk[test_chunk['case_length'] >= prefix_lengths[0]].groupby(case_id_col).head(prefix_lengths[0])
+            test_prefixes[case_id_col] = test_prefixes[case_id_col].apply(lambda x: "%s_%s"%(x, prefix_lengths[0]))
             for nr_events in prefix_lengths[1:]:
-                tmp = grouped_test.head(nr_events)
+                tmp = test_chunk[test_chunk['case_length'] >= nr_events].groupby(case_id_col).head(nr_events)
                 tmp[case_id_col] = tmp[case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
                 test_prefixes = pd.concat([test_prefixes, tmp], axis=0)
-            del grouped_test
             print(time() - start)
             sys.stdout.flush()
 
