@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+import time
 from keras.models import Sequential
 from keras.layers import LSTM, Dense
 from keras.preprocessing import sequence
@@ -27,45 +28,40 @@ datasets = ["bpic2011_f%s"%formula for formula in range(1,2)]
 #datasets = ["bpic2011_f%s"%formula for formula in range(1,5)] + ["bpic2015_%s_f%s"%(municipality, formula) for municipality in range(1,6) for formula in range(1,3)] + ["traffic_fines_f%s"%formula for formula in range(1,4)]
 #datasets = ["bpic2011_f1"]
 #datasets = ["sepsis_cases"]
+datasets = ["bpic2017"]
 
 
-prefix_lengths = list(range(2,21))
+prefix_lengths = list(range(1,21))
 
 train_ratio = 0.8
 max_len = 20
-lstmsize = 512
+lstmsize = 128
 dropout = 0
 optim = 'rmsprop'
 loss = 'binary_crossentropy'
-nb_epoch = 30
+nb_epoch = 15
 batch_size = 1
 time_dim = max_len
 n_classes = 2
 
-#outfile = "results/results_all_single_bpic2011.csv"
-#outfile = "results/results_lstm_bpic2015.csv"
-#outfile = "results/results_all_single_insurance.csv"
-#outfile = "results/results_all_single_traffic.csv"
-#outfile = "results/results_single_public.csv"
-outfile = "results/results_lstm_bpic2011_lstmsize%s_dropout%s.csv"%(lstmsize, int(dropout*100))
-#outfile = "results/results_lstm_sepsis_cases.csv"
-    
     
 ##### MAIN PART ######    
-with open(outfile, 'w') as fout:
-    
-    fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
-    
-    for dataset_name in datasets:
+
+for dataset_name in datasets:
         
-        checkpoint_prefix = "checkpoints/%s_weights_lstmsize%s_dropout%s"%(dataset_name, lstmsize, int(dropout*100))
-        checkpoint_filepath = "%s.{epoch:02d}-{val_loss:.2f}.hdf5"%checkpoint_prefix
-        loss_file = "loss_files/%s_loss_lstmsize%s_dropout%s.txt"%(dataset_name, lstmsize, int(dropout*100))
+    outfile = "results/results_lstm_%s_lstmsize%s_dropout%s_batch%s.csv"%(dataset_name, lstmsize, int(dropout*100), batch_size)
+        
+    checkpoint_prefix = "checkpoints/%s_weights_lstmsize%s_dropout%s_batch%s"%(dataset_name, lstmsize, int(dropout*100), batch_size)
+    checkpoint_filepath = "%s.{epoch:02d}-{val_loss:.2f}.hdf5"%checkpoint_prefix
+    loss_file = "loss_files/%s_loss_lstmsize%s_dropout%s_batch%s.txt"%(dataset_name, lstmsize, int(dropout*100), batch_size)
+        
+    with open(outfile, 'w') as fout:
+        fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
         
         pos_label = dataset_confs.pos_label[dataset_name]
         neg_label = dataset_confs.neg_label[dataset_name]
         
-        """
+        
         # read dataset settings
         case_id_col = dataset_confs.case_id_col[dataset_name]
         activity_col = dataset_confs.activity_col[dataset_name]
@@ -113,26 +109,33 @@ with open(outfile, 'w') as fout:
         dt_train_cat = pd.get_dummies(train[dynamic_cat_cols+static_cat_cols])
         dt_train = pd.concat([dt_train_scaled, dt_train_cat], axis=1)
         dt_train[case_id_col] = train[case_id_col]
-        dt_train[label_col] = train[label_col]
+        dt_train[label_col] = train[label_col].apply(lambda x: 1 if x == pos_label else 0)
 
         data_dim = dt_train.shape[1] - 2
+        n_prefixes = sum(grouped.size().apply(lambda x: min(x, max_len)))
         
         grouped = dt_train.groupby(case_id_col)
-        X = np.zeros((0,max_len,data_dim))
-        y = []
+        start = time.time()
+        X = np.empty((n_prefixes, max_len, data_dim), dtype=np.float32)
+        y = np.empty((n_prefixes, n_classes), dtype=np.float32)
+        idx = 0
         for _, group in grouped:
+            label = (group[label_col].iloc[0], 1 - group[label_col].iloc[0])
+            group = group.as_matrix()
             for i in range(1, min(max_len, len(group)) + 1):
-                X = np.concatenate([X, pad_sequences(group.as_matrix()[np.newaxis,:i,:-2], maxlen=max_len)], axis=0)
-            y.extend([group[label_col].iloc[0]] * (min(max_len, len(group))))
-
+                X[idx] = pad_sequences(group[np.newaxis,:i,:-2], maxlen=max_len)
+                y[idx] = label
+                idx += 1
+        print(time.time() - start)  
         
+        """
         y = pd.get_dummies(y)
         classes = y.columns
         y = y.as_matrix()
-        """
         
         X = np.load(os.path.join("input_lstm", "%s_train_X.npy"%dataset_name))
         y = np.load(os.path.join("input_lstm", "%s_train_y.npy"%dataset_name))
+        """
         classes = np.array([neg_label, pos_label])
         
         data_dim = X.shape[2]
@@ -166,16 +169,18 @@ with open(outfile, 'w') as fout:
         
         # test separately for each prefix length
         for nr_events in prefix_lengths:
-            """
+            
             # select only cases that are at least of length nr_events
             relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
             relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col)
-            test_y = pd.get_dummies(relevant_grouped_test.first()[label_col])[classes].as_matrix()
+            #test_y = pd.get_dummies(relevant_grouped_test.first()[label_col])[classes].as_matrix()
             dt_test = relevant_grouped_test.head(nr_events)
 
             dt_test_scaled = pd.DataFrame(scaler.fit_transform(dt_test[dynamic_num_cols+static_num_cols]), index=dt_test.index, columns=dynamic_num_cols+static_num_cols)
             dt_test_cat = pd.get_dummies(dt_test[dynamic_cat_cols+static_cat_cols])
-            dt_test = pd.concat([dt_test[[case_id_col, label_col, timestamp_col]], dt_test_scaled, dt_test_cat], axis=1)
+            dt_test = pd.concat([dt_test_scaled, dt_test_cat], axis=1)
+            dt_test[case_id_col] = test[case_id_col]
+            dt_test[label_col] = test[label_col].apply(lambda x: 1 if x == pos_label else 0)
 
             # add missing columns if necessary
             missing_cols = [col for col in dt_train.columns if col not in dt_test.columns]
@@ -184,14 +189,23 @@ with open(outfile, 'w') as fout:
             dt_test = dt_test[dt_train.columns]
             
             grouped = dt_test.groupby(case_id_col)
+            n_prefixes = sum(grouped.size().apply(lambda x: min(x, max_len)))
 
-            test_X = np.zeros((0,max_len,data_dim))
+            test_X = np.empty((n_prefixes, max_len, data_dim), dtype=np.float32)
+            test_y = np.empty((n_prefixes, n_classes), dtype=np.float32)
+            idx = 0
             for _, group in grouped:
-                test_X = np.concatenate([test_X, pad_sequences(group.as_matrix()[np.newaxis,:,:-2], maxlen=max_len)], axis=0)
+                label = (group[label_col].iloc[0], 1 - group[label_col].iloc[0])
+                group = group.as_matrix()
+                for i in range(1, min(max_len, len(group)) + 1):
+                    test_X[idx] = pad_sequences(group[np.newaxis,:i,:-2], maxlen=max_len)
+                    test_y[idx] = label
+                    idx += 1
+        
             """
             test_X = np.load(os.path.join("input_lstm", "%s_%sevents_test_X.npy"%(dataset_name, nr_events)))
             test_y = np.load(os.path.join("input_lstm", "%s_%sevents_test_y.npy"%(dataset_name, nr_events)))
-            
+            """
             # predict    
             preds = model.predict(test_X)
             
