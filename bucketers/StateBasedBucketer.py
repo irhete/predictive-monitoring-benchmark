@@ -3,7 +3,7 @@ import numpy as np
 from time import time
 import sys
 
-class StateBasedBucketer():
+class StateBasedBucketer:
     
     def __init__(self):
         self.dt_states = None
