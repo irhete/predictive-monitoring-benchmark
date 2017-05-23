@@ -3,7 +3,7 @@ import numpy as np
 from time import time
 import sys
 
-class PrefixLengthBucketer:
+class PrefixLengthBucketer(object):
     
     def __init__(self, case_id_col):
         self.n_states = 0

@@ -1,6 +1,5 @@
 import sys
 
-sys.path.append("..")
 import dataset_confs
 
 import pandas as pd
