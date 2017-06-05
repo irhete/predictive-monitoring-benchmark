@@ -47,7 +47,7 @@ class AggregateTransformer(TransformerMixin):
         
         # fill missing values with 0-s
         if self.fillna:
-            dt_transformed.fillna(0, inplace=True)
+            dt_transformed = dt_transformed.fillna(0)
             
         # add missing columns if necessary
         if self.columns is None:

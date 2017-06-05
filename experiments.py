@@ -58,7 +58,7 @@ n_min_cases_in_bucket = 30
 ##### MAIN PART ######    
 with open(outfile, 'w') as fout:
     
-    fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
+    fout.write("%s;%s;%s;%s;%s;%s\n"%("dataset", "method", "cls", "nr_events", "metric", "score"))
     
     for dataset_name in datasets:
         
@@ -87,7 +87,7 @@ with open(outfile, 'w') as fout:
                          'case_id_col':dataset_manager.case_id_col, 
                          'cat_cols':[dataset_manager.activity_col], 
                          'num_cols':[], 
-                         'n_clusters':5,#best_params[dataset_name][method_name][cls_name]['n_clusters'], 
+                         'n_clusters':best_params[dataset_name][method_name][cls_method]['n_clusters'], 
                          'random_state':random_state}
         
         cls_encoder_args = {'case_id_col':dataset_manager.case_id_col, 
@@ -97,11 +97,9 @@ with open(outfile, 'w') as fout:
                             'dynamic_num_cols':dataset_manager.dynamic_num_cols, 
                             'fillna':fillna}
         
-        cls_args = {'n_estimators':500,#best_params[dataset_name][method_name][cls_name]['n_estimators'], 
-                    'max_features':0.5,#best_params[dataset_name][method_name][cls_name]['max_features'], 
-                    'gbm_learning_rate':None,#best_params[dataset_name][method_name][cls_name]['gbm_learning_rate'], 
-                    'random_state':random_state,
-                    'min_cases_for_training':n_min_cases_in_bucket}
+        cls_args = {k:v for k,v in best_params[dataset_name][method_name][cls_method].items() if k != 'n_clusters'}
+        cls_args['random_state'] = random_state
+        cls_args['min_cases_for_training'] = n_min_cases_in_bucket
         
         # Bucketing prefixes based on control flow
         print("Bucketing prefixes...")
@@ -119,7 +117,9 @@ with open(outfile, 'w') as fout:
             
             feature_combiner = FeatureUnion([(method, EncoderFactory.get_encoder(method, **cls_encoder_args)) for method in methods])
             pipelines[bucket] = Pipeline([('encoder', feature_combiner), ('cls', ClassifierFactory.get_classifier(cls_method, **cls_args))])
+            
             pipelines[bucket].fit(dt_train_bucket, train_y)
+            
             
         
         prefix_lengths_test = dt_test_prefixes.groupby(dataset_manager.case_id_col).size()
@@ -172,9 +172,9 @@ with open(outfile, 'w') as fout:
                 auc = roc_auc_score(test_y, preds)
             prec, rec, fscore, _ = precision_recall_fscore_support(test_y, [0 if pred < 0.5 else 1 for pred in preds], average="binary")
 
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "auc", auc))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
+            fout.write("%s;%s;%s;%s;%s;%s\n"%(dataset_name, method_name, cls_method, nr_events, "auc", auc))
+            fout.write("%s;%s;%s;%s;%s;%s\n"%(dataset_name, method_name, cls_method, nr_events, "precision", prec))
+            fout.write("%s;%s;%s;%s;%s;%s\n"%(dataset_name, method_name, cls_method, nr_events, "recall", rec))
+            fout.write("%s;%s;%s;%s;%s;%s\n"%(dataset_name, method_name, cls_method, nr_events, "fscore", fscore))
             
         print("\n")

@@ -35,7 +35,7 @@ class LastStateTransformer(TransformerMixin):
         
         # fill NA with 0 if requested
         if self.fillna:
-            dt_transformed.fillna(0, inplace=True)
+            dt_transformed = dt_transformed.fillna(0)
             
         # add missing columns if necessary
         if self.columns is not None:

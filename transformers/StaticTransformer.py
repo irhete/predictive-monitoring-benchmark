@@ -32,10 +32,10 @@ class StaticTransformer(TransformerMixin):
         if len(self.cat_cols) > 0:
             dt_cat = pd.get_dummies(dt_first[self.cat_cols])
             dt_transformed = pd.concat([dt_transformed, dt_cat], axis=1)
-        
+
         # fill NA with 0 if requested
         if self.fillna:
-            dt_transformed.fillna(0, inplace=True)
+            dt_transformed = dt_transformed.fillna(0)
             
         # add missing columns if necessary
         if self.columns is not None:
