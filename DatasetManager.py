@@ -92,7 +92,7 @@ class DatasetManager:
         y = self.get_label(data) # one row per case
         return [1 if label == self.pos_label else 0 for label in y]
     
-    def get_class_ratio(data):
+    def get_class_ratio(self, data):
         class_freqs = data[self.label_col].value_counts()
         return class_freqs[self.pos_label] / class_freqs.sum()
     

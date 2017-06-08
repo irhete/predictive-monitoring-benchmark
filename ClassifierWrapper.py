@@ -17,7 +17,7 @@ class ClassifierWrapper(object):
 
         # if all the training instances are of the same class, use this class as prediction
         elif len(set(y)) < 2:
-            self.hardcoded_prediction = int(y.iloc[0])
+            self.hardcoded_prediction = int(y[0])
 
         else:
             self.cls.fit(X, y)

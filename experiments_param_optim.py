@@ -9,9 +9,9 @@ import os
 from sys import argv
 import itertools
 
-from EncoderFactory import EncoderFactory
-from BucketFactory import BucketFactory
-from ClassifierFactory import ClassifierFactory
+import EncoderFactory
+import BucketFactory
+import ClassifierFactory
 from DatasetManager import DatasetManager
 
 dataset_ref = argv[1]
@@ -44,7 +44,7 @@ datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else data
 methods = encoding_dict[cls_encoding]
 
 # bucketing params to optimize 
-if bucket_encoding == "cluster":
+if bucket_method == "cluster":
     bucketer_params = {'n_clusters':[2, 5, 7, 10, 20, 40]}
 else:
     bucketer_params = {'n_clusters':[1]}

@@ -169,7 +169,8 @@ with open(outfile, 'w') as fout:
             test_y = [1 if label==pos_label else 0 for label in test_prefixes.groupby(case_id_col).first()[label_col]]
 
             # Assign states
-            boolean_encoder = BooleanTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
+            #boolean_encoder = BooleanTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
+            boolean_encoder = LastStateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
             data_bool = boolean_encoder.fit_transform(train_prefixes)
             bucketer = StateBasedBucketer()
             train_states = bucketer.fit_predict(data_bool)

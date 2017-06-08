@@ -26,15 +26,15 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
+dataset_ref = argv[1]
+method_name = argv[2]
+results_dir = argv[3]
+
 home_dir = ".."
-results_dir = "final_results3"
-optimal_params_filename = "optimal_params3.pickle"
+optimal_params_filename = "optimal_params4.pickle"
 
 if not os.path.exists(os.path.join(home_dir, results_dir)):
     os.makedirs(os.path.join(home_dir, results_dir))
-
-dataset_ref = argv[1]
-method_name = argv[2]
 
 with open(os.path.join(home_dir, optimal_params_filename), "rb") as fin:
     best_params = pickle.load(fin)
@@ -119,6 +119,10 @@ with open(outfile, 'w') as fout:
     fout.write("%s;%s;%s;%s;%s\n"%("dataset", "method", "nr_events", "metric", "score"))
     
     for dataset_name in datasets:
+        encoding_time_train = 0
+        cls_time_train = 0
+        online_time = 0
+        
         print("Started...")
         sys.stdout.flush()
         # read dataset settings
@@ -133,7 +137,7 @@ with open(outfile, 'w') as fout:
         dynamic_num_cols = dataset_confs.dynamic_num_cols[dataset_name]
         static_num_cols = dataset_confs.static_num_cols[dataset_name]
         
-        data_filepath = os.path.join(home_dir, dataset_confs.filename[dataset_name])
+        data_filepath = dataset_confs.filename[dataset_name]
         
         # specify data types
         dtypes = {col:"object" for col in dynamic_cat_cols+static_cat_cols+[case_id_col, label_col, timestamp_col]}
@@ -148,8 +152,8 @@ with open(outfile, 'w') as fout:
         
         # consider prefix lengths until 90% of positive cases have finished
         min_prefix_length = 1 if "hmm_disc" not in methods else 2
-        prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
-        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
+        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
+        prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
         
         print("Splitting...")
         sys.stdout.flush()
@@ -200,17 +204,25 @@ with open(outfile, 'w') as fout:
         # get training times
         train_encoding_fit_time = sum([el[1].fit_time for el in pipeline.named_steps["encoder"].transformer_list])
         train_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
-        cls_fit_time = pipeline_fit_time - train_encoding_fit_time - train_encoding_transform_time
+        encoding_time_train += train_encoding_fit_time
+        encoding_time_train += train_encoding_transform_time
+        cls_time_train += pipeline_fit_time - train_encoding_fit_time - train_encoding_transform_time
+        
+        #train_encoding_fit_time = sum([el[1].fit_time for el in pipeline.named_steps["encoder"].transformer_list])
+        #train_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
+        #cls_fit_time = pipeline_fit_time - train_encoding_fit_time - train_encoding_transform_time
 
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "cls_fit_time", cls_fit_time))
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_fit_time", train_encoding_fit_time))
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_transform_time_train", train_encoding_transform_time))
+        #fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "cls_fit_time", cls_fit_time))
+        #fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_fit_time", train_encoding_fit_time))
+        #fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoder_transform_time_train", train_encoding_transform_time))
         
         # test separately for each prefix length
         for nr_events in prefix_lengths:
                 
             # select only cases that are at least of length nr_events
-            relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
+            #relevant_case_ids = test_case_lengths.index[test_case_lengths >= nr_events]
+            relevant_case_ids = test_case_lengths.index
+            
             if len(relevant_case_ids) == 0:
                 break
             relevant_grouped_test = test[test[case_id_col].isin(relevant_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
@@ -222,10 +234,10 @@ with open(outfile, 'w') as fout:
             sys.stdout.flush()
             start = time()
             preds = pipeline.predict_proba(relevant_grouped_test.head(nr_events))[:,preds_pos_label_idx]
-            pipeline_pred_time = time() - start
+            online_time += time() - start
             del relevant_grouped_test
-            test_encoding_transform_time = sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
-            cls_pred_time = pipeline_pred_time - test_encoding_transform_time
+            online_time += sum([el[1].transform_time for el in pipeline.named_steps["encoder"].transformer_list])
+            #cls_pred_time = pipeline_pred_time - test_encoding_transform_time
 
             if len(set(test_y)) < 2:
                 auc = None
@@ -237,8 +249,10 @@ with open(outfile, 'w') as fout:
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_predict_time", cls_pred_time))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "encoder_transform_time_test", test_encoding_transform_time))
+            
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoding_time_train", encoding_time_train))
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "cls_time_train", cls_time_train))
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "online_time", online_time))
                 
         print("\n")
                 

@@ -8,9 +8,9 @@ import pickle
 import os
 from sys import argv
 
-from EncoderFactory import EncoderFactory
-from BucketFactory import BucketFactory
-from ClassifierFactory import ClassifierFactory
+import EncoderFactory
+import BucketFactory
+import ClassifierFactory
 from DatasetManager import DatasetManager
 
 dataset_ref = argv[1]

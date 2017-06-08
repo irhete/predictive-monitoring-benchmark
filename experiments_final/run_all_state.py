@@ -155,7 +155,8 @@ with open(outfile, 'w') as fout:
         # Assign states
         print("Assigning states...")
         start = time()
-        boolean_encoder = BooleanTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
+        #boolean_encoder = BooleanTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
+        boolean_encoder = LastStateTransformer(case_id_col=case_id_col, cat_cols=[activity_col], num_cols=[], fillna=fillna)
         data_bool = boolean_encoder.fit_transform(train_prefixes)
         bucketer = StateBasedBucketer()
         train_states = bucketer.fit_predict(data_bool)
@@ -176,7 +177,7 @@ with open(outfile, 'w') as fout:
                 train_y = [1 if label==pos_label else 0 for label in dt_train_cluster.groupby(case_id_col).first()[label_col]]
                 hardcoded_predictions[cl] = np.mean(train_y)
             elif len(train_prefixes[train_prefixes[case_id_col].isin(relevant_cases)][label_col].unique()) < 2:
-                hardcoded_predictions[cl] = train_prefixes[train_prefixes[case_id_col].isin(relevant_cases)][[label_col]].iloc[0]
+                hardcoded_predictions[cl] = 1 if str(train_prefixes[train_prefixes[case_id_col].isin(relevant_cases)][[label_col]].iloc[0]) == pos_label else 0
             else:
                 cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=rf_max_features, random_state=random_state)
                 feature_combiner = FeatureUnion([(method, init_encoder(method)) for method in methods])
@@ -212,15 +213,15 @@ with open(outfile, 'w') as fout:
                     
             start = time()
             # get predicted state for each test case
-            test_data_cool = boolean_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
-            test_states = bucketer.predict(test_data_cool)
+            test_data_bool = boolean_encoder.transform(relevant_test.groupby(case_id_col).head(nr_events))
+            test_states = bucketer.predict(test_data_bool)
             online_time += time() - start
 
             # use appropriate classifier for each bucket of test cases
             preds = []
             test_y = []
-            for cl in range(bucketer.n_states):
-                current_cluster_case_ids = test_data_cool[test_states == cl].index
+            for cl in set(test_states):
+                current_cluster_case_ids = test_data_bool[test_states == cl].index
                 current_cluster_grouped_test = relevant_test[relevant_test[case_id_col].isin(current_cluster_case_ids)].sort_values(timestamp_col, ascending=True).groupby(case_id_col, as_index=False)
                     
                 if len(current_cluster_case_ids) == 0:

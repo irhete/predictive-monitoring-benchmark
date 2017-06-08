@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import sys
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.pipeline import Pipeline, FeatureUnion
 from time import time
 import pickle
@@ -23,15 +23,26 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
+dataset_ref = argv[1]
+method_name = argv[2]
+results_dir = argv[3]
+classifier = argv[4]
+
+if classifier == "gbm":
+    optimal_params_filename = "optimal_params_gbm.pickle"
+elif classfier == "rf":
+    optimal_params_filename = "optimal_params4.pickle"
+    rf_n_estimators = 500
+
+    
 home_dir = ".."
 
-with open(os.path.join(home_dir, "optimal_params3.pickle"), "rb") as fin:
+with open(os.path.join(home_dir, optimal_params_filename), "rb") as fin:
     best_params = pickle.load(fin)
 
 
 dataset_ref_to_datasets = {
     "bpic2011": ["bpic2011_f%s"%formula for formula in range(1,5)],
-    #"bpic2015_f1": ["bpic2015_%s_f1"%(municipality) for municipality in range(1,6)],
     "bpic2015": ["bpic2015_%s_f2"%(municipality) for municipality in range(1,6)],
     "insurance": ["insurance_activity", "insurance_followup"],
     "sepsis_cases": ["sepsis_cases"],
@@ -41,20 +52,11 @@ dataset_ref_to_datasets = {
 }
 dataset_ref_to_datasets["small_logs"] = dataset_ref_to_datasets["bpic2011"] + dataset_ref_to_datasets["bpic2015"] + dataset_ref_to_datasets["insurance"] + dataset_ref_to_datasets["sepsis_cases"]
 
-    
-
-dataset_ref = argv[1]
-method_name = argv[2]
 
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
-outfile = os.path.join(home_dir, "final_results3/final_results_index_%s.csv"%dataset_ref)
+outfile = os.path.join(home_dir, results_dir, "final_results_%s_index_%s.csv"%(classifier, dataset_ref))
 
 train_ratio = 0.8
-hmm_min_seq_length = 2
-hmm_max_seq_length = None
-hmm_n_iter = 30
-hmm_n_states = 6
-rf_n_estimators = 500
 random_state = 22
 fillna = True
 
@@ -71,6 +73,10 @@ with open(outfile, 'w') as fout:
     
     for dataset_name in datasets:
         
+        encoding_time_train = 0
+        cls_time_train = 0
+        online_time = 0
+        
         print("Reading dataset...")
         sys.stdout.flush()
         # read dataset settings
@@ -85,7 +91,7 @@ with open(outfile, 'w') as fout:
         dynamic_num_cols = dataset_confs.dynamic_num_cols[dataset_name]
         static_num_cols = dataset_confs.static_num_cols[dataset_name]
         
-        data_filepath = os.path.join(home_dir, dataset_confs.filename[dataset_name])
+        data_filepath = dataset_confs.filename[dataset_name]
         
         dtypes = {col:"object" for col in dynamic_cat_cols+static_cat_cols+[case_id_col, label_col, timestamp_col]}
         for col in dynamic_num_cols + static_num_cols:
@@ -95,9 +101,8 @@ with open(outfile, 'w') as fout:
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
         
         # consider prefix lengths until 90% of positive cases have finished
-        min_prefix_length = 1 if "hmm_disc" not in methods else 2
-        prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data.groupby(case_id_col).size().quantile(0.75)))) + 1))
-        #prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
+        min_prefix_length = 1
+        prefix_lengths = list(range(min_prefix_length, min(20, int(np.ceil(data[data[label_col]==pos_label].groupby(case_id_col).size().quantile(0.90)))) + 1))
         
         # split into train and test using temporal split
         start_timestamps = data.groupby(case_id_col)[timestamp_col].min().reset_index()
@@ -121,11 +126,13 @@ with open(outfile, 'w') as fout:
         
         start = time()
         dt_train_index_all = index_encoder.transform(train)
-        train_index_encode_time_all = time() - start
+        #train_index_encode_time_all = time() - start
+        encoding_time_train += time() - start
         
         start = time()
         dt_test_index_all = index_encoder.transform(test)
-        test_index_encode_time_all = time() - start
+        #test_index_encode_time_all = time() - start
+        online_time += time() - start
         
         # encode all static
         print("Encoding static...")
@@ -134,17 +141,19 @@ with open(outfile, 'w') as fout:
         
         start = time()
         dt_train_static = static_transformer.transform(train)
-        train_encode_time_base = time() - start
+        #train_encode_time_base = time() - start
+        encoding_time_train += time() - start
         
         start = time()
         dt_test_static = static_transformer.transform(test)
-        test_encode_time_base = time() - start
+        #test_encode_time_base = time() - start
+        online_time += time() - start
         
         print("Evaluating method %s..."%method_name)
         sys.stdout.flush()
 
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "train_index_encode_time_all", train_index_encode_time_all))
-        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "test_index_encode_time_all", test_index_encode_time_all))
+        #fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "train_index_encode_time_all", train_index_encode_time_all))
+        #fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "test_index_encode_time_all", test_index_encode_time_all))
             
         for nr_events in prefix_lengths:
             if dataset_name not in best_params or method_name not in best_params[dataset_name] or nr_events not in best_params[dataset_name][method_name]:
@@ -157,17 +166,20 @@ with open(outfile, 'w') as fout:
 
             start = time()
             train_X = pd.concat([dt_train_static, index_extractor.transform(dt_train_index_all)], axis=1)
-            train_encode_time = train_encode_time_base + time() - start
+            #train_encode_time = train_encode_time_base + time() - start
+            encoding_time_train += time() - start
 
 
             # retain only test cases with length at least nr_events
             relevant_test_static = dt_test_static[test_case_lengths >= nr_events]
+            
             if len(relevant_test_static) == 0:
                 break
                     
             start = time()
             test_X = pd.concat([relevant_test_static, index_extractor.transform(dt_test_index_all.loc[test_case_lengths >= nr_events])], axis=1)
-            test_encode_time = test_encode_time_base + time() - start
+            #test_encode_time = test_encode_time_base + time() - start
+            online_time += time() - start
                 
             test_y = [1 if label==pos_label else 0 for label in test_y_all[test_case_lengths >= nr_events]]
                 
@@ -195,9 +207,20 @@ with open(outfile, 'w') as fout:
             print("Fitting classifier...")
             sys.stdout.flush()
             start = time()
-            cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=best_params[dataset_name][method_name][nr_events]['rf_max_features'], random_state=random_state)
+            
+            if classifier == "rf":
+                cls = RandomForestClassifier(n_estimators=rf_n_estimators, max_features=best_params[dataset_name][method_name][nr_events]['rf_max_features'], random_state=random_state)
+                
+            elif classifier == "gbm":
+                cls = GradientBoostingClassifier(n_estimators=best_params[dataset_name][method_name][nr_events]['gbm_n_estimators'], max_features=best_params[dataset_name][method_name][nr_events]['gbm_max_features'], learning_rate=best_params[dataset_name][method_name][nr_events]['gbm_learning_rate'], random_state=random_state)
+                
+            else:
+                print("Classifier unknown")
+                break
+                
             cls.fit(train_X, train_y)
-            cls_fit_time = time() - start
+            #cls_fit_time = time() - start
+            cls_time_train += time() - start
             preds_pos_label_idx = np.where(cls.classes_ == pos_label)[0][0] 
             del train_X
                 
@@ -206,7 +229,8 @@ with open(outfile, 'w') as fout:
             sys.stdout.flush()
             start = time()
             preds = cls.predict_proba(test_X)[:,preds_pos_label_idx]
-            cls_pred_time = time() - start
+            online_time += time() - start
+            #cls_pred_time = time() - start
             del test_X
 
             if len(set(test_y)) < 2:
@@ -220,7 +244,7 @@ with open(outfile, 'w') as fout:
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "precision", prec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "recall", rec))
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "fscore", fscore))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "train_encode_time", train_encode_time))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "test_encode_time", test_encode_time))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_fit_time", cls_fit_time))
-            fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, nr_events, "cls_predict_time", cls_pred_time))
+        
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "encoding_time_train", encoding_time_train))
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "cls_time_train", cls_time_train))
+        fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, 0, "online_time", online_time))
