@@ -38,6 +38,7 @@ dataset_ref_to_datasets = {
 encoding_dict = {
     "laststate": ["static", "last"],
     "agg": ["static", "agg"],
+    "index": ["static", "index"],
     "combined": ["static", "last", "agg"]}
     
 datasets = [dataset_ref] if dataset_ref not in dataset_ref_to_datasets else dataset_ref_to_datasets[dataset_ref]
@@ -171,7 +172,7 @@ with open(outfile, 'w') as fout:
                             del relevant_cases_nr_events
                         else:
                             # evaluate on all prefixes
-                            dt_test_nr_events = dt_test_prefixes
+                            dt_test_nr_events = dt_test_prefixes.copy()
 
                         start = time()
                         # get predicted cluster for each test case
@@ -182,8 +183,8 @@ with open(outfile, 'w') as fout:
                         preds = []
                         test_y = []
                         for bucket in set(bucket_assignments_test):
-                            relevant_cases_bucket = dataset_manager.get_indexes(dt_test_prefixes)[bucket_assignments_test == bucket]
-                            dt_test_bucket = dataset_manager.get_relevant_data_by_indexes(dt_test_prefixes, relevant_cases_bucket) # one row per event
+                            relevant_cases_bucket = dataset_manager.get_indexes(dt_test_nr_events)[bucket_assignments_test == bucket]
+                            dt_test_bucket = dataset_manager.get_relevant_data_by_indexes(dt_test_nr_events, relevant_cases_bucket) # one row per event
 
                             if len(relevant_cases_bucket) == 0:
                                 continue

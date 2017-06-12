@@ -50,8 +50,8 @@ data_best_over_all_prefixes = data_agg_over_all_prefixes.sort_values("score", as
 
 best_params = {}
 
-# all except index-based
-for row in data_best_over_all_prefixes[~data_best_over_all_prefixes.method.str.contains("index")][["dataset", "method", "cls"] + params_cols].values:
+# all except prefix length based
+for row in data_best_over_all_prefixes[~data_best_over_all_prefixes.method.str.contains("prefix")][["dataset", "method", "cls"] + params_cols].values:
     
     if row[0] not in best_params:
         best_params[row[0]] = {}
@@ -72,8 +72,8 @@ for row in data_best_over_all_prefixes[~data_best_over_all_prefixes.method.str.c
         best_params[row[0]][row[1]][row[2]][param] = value
         
         
-# only index-based
-for row in data_agg[data_agg.method.str.contains("index")][["dataset", "method", "cls", "nr_events"] + params_cols].values:
+# only prefix length based
+for row in data_best[data_best.method.str.contains("prefix")][["dataset", "method", "cls", "nr_events"] + params_cols].values:
     
     if row[0] not in best_params:
         best_params[row[0]] = {}

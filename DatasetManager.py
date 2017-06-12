@@ -59,21 +59,10 @@ class DatasetManager:
             tmp = data[data['case_length'] >= nr_events].groupby(self.case_id_col).head(nr_events)
             tmp[self.case_id_col] = tmp[self.case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
             dt_prefixes = pd.concat([dt_prefixes, tmp], axis=0)
-
+        
+        dt_prefixes['case_length'] = dt_prefixes.groupby(self.case_id_col)[self.activity_col].transform(len)
+        
         return dt_prefixes
-    
-    
-    def generate_suffix_data(self, data, min_length, max_length):
-        # generate suffix data (each possible suffix becomes a trace)
-        data['case_length'] = data.groupby(self.case_id_col)[self.activity_col].transform(len)
-
-        dt_suffixes = data[data['case_length'] >= min_length].groupby(self.case_id_col).tail(min_length)
-        for nr_events in range(min_length+1, max_length+1):
-            tmp = data[data['case_length'] >= nr_events].groupby(self.case_id_col).tail(nr_events)
-            tmp[self.case_id_col] = tmp[self.case_id_col].apply(lambda x: "%s_%s"%(x, nr_events))
-            dt_suffixes = pd.concat([dt_suffixes, tmp], axis=0)
-
-        return dt_suffixes
 
 
     def get_pos_case_length_quantile(self, data, quantile=0.90):
