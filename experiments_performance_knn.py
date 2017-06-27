@@ -3,6 +3,7 @@ import numpy as np
 import sys
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.neighbors import NearestNeighbors
 from time import time
 import pickle
 import os
@@ -108,45 +109,43 @@ with open(outfile, 'w') as fout:
             prefix_generation_time = time() - start_prefix_generation
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, ii, "prefix_generation_time", prefix_generation_time))
             
-            start_offline = time()
+
+            n_neighbors = best_params[dataset_name][method_name][cls_method]['n_neighbors']
+        
+            # extract arguments
+            knn_encoder_args = {'case_id_col':dataset_manager.case_id_col, 
+                        'static_cat_cols':[],
+                        'static_num_cols':[], 
+                        'dynamic_cat_cols':[dataset_manager.activity_col],
+                        'dynamic_num_cols':[], 
+                        'fillna':fillna}
+
+            cls_encoder_args = {'case_id_col':dataset_manager.case_id_col, 
+                                'static_cat_cols':dataset_manager.static_cat_cols,
+                                'static_num_cols':dataset_manager.static_num_cols, 
+                                'dynamic_cat_cols':dataset_manager.dynamic_cat_cols,
+                                'dynamic_num_cols':dataset_manager.dynamic_num_cols, 
+                                'fillna':fillna}
+
+            cls_args = {'max_features': best_params[dataset_name][method_name][cls_method]['max_features'],
+                        'n_estimators': 500,
+                        'random_state': random_state,
+                        'min_cases_for_training': n_min_cases_in_bucket}
+        
+            start = time()
+            # initiate the KNN model
+            cf_encoder = EncoderFactory.get_encoder(bucket_encoding, **knn_encoder_args)
+            encoded_train = cf_encoder.fit_transform(dt_train_prefixes)
+            nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm='auto').fit(encoded_train)
             
-            # Bucketing prefixes based on control flow
-            print("Bucketing prefixes...")
-            bucketer = BucketFactory.get_bucketer(bucket_method, **bucketer_args)
-            bucket_assignments_train = bucketer.fit_predict(dt_train_prefixes)
-
-            pipelines = {}
-
-            # train and fit pipeline for each bucket
-            for bucket in set(bucket_assignments_train):
-                print("Fitting pipeline for bucket %s..."%bucket)
-
-                # set optimal params for this bucket
-                if bucket_method == "prefix":
-                    cls_args = {k:v for k,v in best_params[dataset_name][method_name][cls_method][bucket].items() if k not in ['n_clusters', 'n_neighbors']}
-                else:
-                    cls_args = {k:v for k,v in best_params[dataset_name][method_name][cls_method].items() if k not in ['n_clusters', 'n_neighbors']}
-                cls_args['random_state'] = random_state
-                cls_args['min_cases_for_training'] = n_min_cases_in_bucket
-
-                # select relevant cases
-                relevant_cases_bucket = dataset_manager.get_indexes(dt_train_prefixes)[bucket_assignments_train == bucket]
-                dt_train_bucket = dataset_manager.get_relevant_data_by_indexes(dt_train_prefixes, relevant_cases_bucket) # one row per event
-                train_y = dataset_manager.get_label_numeric(dt_train_bucket)
-
-                feature_combiner = FeatureUnion([(method, EncoderFactory.get_encoder(method, **cls_encoder_args)) for method in methods])
-                pipelines[bucket] = Pipeline([('encoder', feature_combiner), ('cls', ClassifierFactory.get_classifier(cls_method, **cls_args))])
-
-                pipelines[bucket].fit(dt_train_bucket, train_y)
-
-
-            offline_total_time = time() - start_offline
+            offline_total_time = time() - start
             offline_total_times.append(offline_total_time)
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, ii, "offline_time_total", offline_total_time))
-            current_online_event_times = []
             
+            current_online_event_times = []
+        
             prefix_lengths_test = dt_test_prefixes.groupby(dataset_manager.case_id_col).size()
-
+        
             # test separately for each prefix length
             for nr_events in range(min_prefix_length, max_prefix_length+1):
                 print("Predicting for %s events..."%nr_events)
@@ -160,18 +159,40 @@ with open(outfile, 'w') as fout:
                 dt_test_nr_events = dataset_manager.get_relevant_data_by_indexes(dt_test_prefixes, relevant_cases_nr_events)
                 del relevant_cases_nr_events
 
-                # predict separately for each prefix case
-                test_all_grouped = dt_test_nr_events.groupby(dataset_manager.case_id_col)
-                for _, group in test_all_grouped:
+                start = time()
+                # get nearest neighbors for each test case
+                encoded_test = cf_encoder.fit_transform(dt_test_nr_events)
+                _, indices = nbrs.kneighbors(encoded_test)
+
+                # use appropriate classifier for each bucket of test cases
+                # for evaluation, collect predictions from different buckets together
+                for i in range(len(encoded_test)):
+                    
                     start = time()
-                    bucket_assignments_test = bucketer.predict(group)
-                    bucket = bucket_assignments_test[0]
-                    if bucket in pipelines:
-                        preds = pipelines[bucket].predict_proba(group)
+
+                    # retrieve nearest neighbors from training set
+                    knn_idxs = indices[i]
+                    relevant_cases_bucket = encoded_train.iloc[knn_idxs].index
+                    dt_train_bucket = dataset_manager.get_relevant_data_by_indexes(dt_train_prefixes, relevant_cases_bucket) # one row per event
+                    train_y = dataset_manager.get_label_numeric(dt_train_bucket)
+
+                    feature_combiner = FeatureUnion([(method, EncoderFactory.get_encoder(method, **cls_encoder_args)) for method in methods])
+                    pipeline = Pipeline([('encoder', feature_combiner), ('cls', ClassifierFactory.get_classifier(cls_method, **cls_args))])
+
+                    # fit the classifier based on nearest neighbors
+                    pipeline.fit(dt_train_bucket, train_y)
+
+                    # select current test case
+                    relevant_test_case = [encoded_test.index[i]]
+                    dt_test_bucket = dataset_manager.get_relevant_data_by_indexes(dt_test_nr_events, relevant_test_case)
+
+                    # predict
+                    pipeline.predict_proba(dt_test_bucket)
                     
                     pipeline_pred_time = time() - start
                     current_online_event_times.append(pipeline_pred_time / nr_events)
             
+
             online_event_times.extend(current_online_event_times)
             
             fout.write("%s;%s;%s;%s;%s\n"%(dataset_name, method_name, ii, "online_time_avg", np.mean(current_online_event_times)))

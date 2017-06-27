@@ -42,6 +42,15 @@ def extract_timestamp_features(group):
     return group
 
 
+def cut_before_activity(group):
+    relevant_activity_idxs = np.where(group[activity_col] == relevant_activity)[0]
+    if len(relevant_activity_idxs) > 0:
+        cut_idx = relevant_activity_idxs[0]
+        return group[:cut_idx]
+    else:
+        return group
+
+
 for filename in filenames:
     data = pd.read_csv(os.path.join(input_data_folder,filename), sep=";")
 
@@ -58,6 +67,25 @@ for filename in filenames:
     # add features extracted from timestamp
     data[timestamp_col] = pd.to_datetime(data[timestamp_col])
     data = data.groupby(case_id_col).apply(extract_timestamp_features)
+    
+    print("Cutting activities...")
+    # cut traces before relevant activity happens
+    if "f1" in filename:
+        relevant_activity = "AC379414" #"tumor marker CA-19.9"
+        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        relevant_activity = "378619A" #"ca-125 using meia"
+        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        
+    elif "f3" in filename:
+        relevant_activity = "AC356134" #"histological examination - biopsies nno"
+        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        relevant_activity = "376480A" #"squamous cell carcinoma using eia"
+        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        
+    elif "f4" in filename:
+        relevant_activity = "AC356133" #"histological examination - big resectiep"
+        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+    
     
     # impute missing values
     grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
