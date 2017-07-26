@@ -27,6 +27,7 @@ Together with the code, we make available 10 datasets that were used in the eval
 
 If you use code from this repository, please cite the following paper:
 
+```
 @article{Teinemaa2017,
    author = {{Teinemaa}, I. and {Dumas}, M. and {La Rosa}, M. and {Maggi}, F.~M.},
     title = "{Outcome-Oriented Predictive Process Monitoring: Review and Benchmark}",
@@ -40,3 +41,4 @@ archivePrefix = "arXiv",
    adsurl = {http://adsabs.harvard.edu/abs/2017arXiv170706766T},
   adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
+```
