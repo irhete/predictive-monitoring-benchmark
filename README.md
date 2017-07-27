@@ -23,7 +23,7 @@ The benchmark experiments have been performed using two classifiers:
 * Random forest
 * Gradient boosted trees
 
-Together with the code, we make available 10 datasets that were used in the evaluation section in the paper. These datasets correspond to different prediction tasks, formulated on 3 publicly available event logs (namely, the [BPIC 2011](https://data.4tu.nl/repository/uuid:d9769f3d-0ab0-4fb8-803b-0d1120ffcf54), [BPIC 2015](http://data.4tu.nl/repository/uuid:31a308ef-c844-48da-948c-305d167a0ec1), and [BPIC 2017](http://data.4tu.nl/repository/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b) event logs). These (labeled and preprocessed) benchmark datasets can be found at [](https://drive.google.com/file/d/0B-ifLE4v5dewMlI5enJKWnBwb0k).
+Together with the code, we make available 10 datasets that were used in the evaluation section in the paper. These datasets correspond to different prediction tasks, formulated on 3 publicly available event logs (namely, the [BPIC 2011](https://data.4tu.nl/repository/uuid:d9769f3d-0ab0-4fb8-803b-0d1120ffcf54), [BPIC 2015](http://data.4tu.nl/repository/uuid:31a308ef-c844-48da-948c-305d167a0ec1), and [BPIC 2017](http://data.4tu.nl/repository/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b) event logs). These (labeled and preprocessed) benchmark datasets can be found at https://drive.google.com/file/d/0B-ifLE4v5dewMlI5enJKWnBwb0k.
 
 If you use code from this repository, please cite the following paper:
 
