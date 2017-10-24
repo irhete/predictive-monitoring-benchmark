@@ -29,7 +29,7 @@ cat_cols = dynamic_cat_cols + static_cat_cols
 
 def extract_timestamp_features(group):
     
-    group = group.sort_values(timestamp_col, ascending=False)
+    group = group.sort_values(timestamp_col, ascending=False, kind='mergesort')
     start_date = group[timestamp_col].iloc[-1]
     
     tmp = group[timestamp_col] - group[timestamp_col].shift(-1)
@@ -78,13 +78,8 @@ for filename in filenames:
     data[timestamp_col] = pd.to_datetime(data[timestamp_col])
     data = data.groupby(case_id_col).apply(extract_timestamp_features)
     
-    #print("Cutting activities...")
-    # cut traces before relevant activity happens
-    #relevant_activity = "O_Accepted"
-    #data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
-    
     # impute missing values
-    grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+    grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col, kind='mergesort')
     for col in static_cols + dynamic_cols:
         data[col] = grouped[col].transform(lambda grp: grp.fillna(method='ffill'))
         

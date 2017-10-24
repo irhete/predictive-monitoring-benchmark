@@ -31,7 +31,7 @@ def split_parts(group, parts_col="parts"):
 
 def extract_timestamp_features(group):
     
-    group = group.sort_values(timestamp_col, ascending=False)
+    group = group.sort_values(timestamp_col, ascending=False, kind='mergesort')
     start_date = group[timestamp_col].iloc[-1]
     
     tmp = group[timestamp_col] - group[timestamp_col].shift(-1)
@@ -69,7 +69,7 @@ for filename in filenames:
     data = data.groupby(case_id_col).apply(extract_timestamp_features)
     
     # impute missing values
-    grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+    grouped = data.sort_values(timestamp_col, ascending=True, kind='mergesort').groupby(case_id_col)
     for col in static_cols + dynamic_cols:
         data[col] = grouped[col].transform(lambda grp: grp.fillna(method='ffill'))
         

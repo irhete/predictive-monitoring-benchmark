@@ -28,7 +28,7 @@ cat_cols = dynamic_cat_cols + static_cat_cols
 
 def extract_timestamp_features(group):
     
-    group = group.sort_values(timestamp_col, ascending=False)
+    group = group.sort_values(timestamp_col, ascending=False, kind='mergesort')
     start_date = group[timestamp_col].iloc[-1]
     
     tmp = group[timestamp_col] - group[timestamp_col].shift(-1)
@@ -72,23 +72,23 @@ for filename in filenames:
     # cut traces before relevant activity happens
     if "f1" in filename:
         relevant_activity = "AC379414" #"tumor marker CA-19.9"
-        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        data = data.sort_values(timestamp_col, kind='mergesort').groupby(case_id_col).apply(cut_before_activity)
         relevant_activity = "378619A" #"ca-125 using meia"
-        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        data = data.sort_values(timestamp_col, kind='mergesort').groupby(case_id_col).apply(cut_before_activity)
         
     elif "f3" in filename:
         relevant_activity = "AC356134" #"histological examination - biopsies nno"
-        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        data = data.sort_values(timestamp_col, kind='mergesort').groupby(case_id_col).apply(cut_before_activity)
         relevant_activity = "376480A" #"squamous cell carcinoma using eia"
-        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        data = data.sort_values(timestamp_col, kind='mergesort').groupby(case_id_col).apply(cut_before_activity)
         
     elif "f4" in filename:
         relevant_activity = "AC356133" #"histological examination - big resectiep"
-        data = data.sort_values(timestamp_col).groupby(case_id_col).apply(cut_before_activity)
+        data = data.sort_values(timestamp_col, kind='mergesort').groupby(case_id_col).apply(cut_before_activity)
     
     
     # impute missing values
-    grouped = data.sort_values(timestamp_col, ascending=True).groupby(case_id_col)
+    grouped = data.sort_values(timestamp_col, ascending=True, kind='mergesort').groupby(case_id_col)
     for col in static_cols + dynamic_cols:
         data[col] = grouped[col].transform(lambda grp: grp.fillna(method='ffill'))
         

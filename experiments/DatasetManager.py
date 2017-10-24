@@ -42,10 +42,10 @@ class DatasetManager:
 
         grouped = data.groupby(self.case_id_col)
         start_timestamps = grouped[self.timestamp_col].min().reset_index()
-        start_timestamps = start_timestamps.sort_values(self.timestamp_col, ascending=True)
+        start_timestamps = start_timestamps.sort_values(self.timestamp_col, ascending=True, kind='mergesort')
         train_ids = list(start_timestamps[self.case_id_col])[:int(train_ratio*len(start_timestamps))]
-        train = data[data[self.case_id_col].isin(train_ids)].sort_values(self.timestamp_col, ascending=True)
-        test = data[~data[self.case_id_col].isin(train_ids)].sort_values(self.timestamp_col, ascending=True)
+        train = data[data[self.case_id_col].isin(train_ids)].sort_values(self.timestamp_col, ascending=True, kind='mergesort')
+        test = data[~data[self.case_id_col].isin(train_ids)].sort_values(self.timestamp_col, ascending=True, kind='mergesort')
 
         return (train, test)
 
@@ -91,6 +91,6 @@ class DatasetManager:
         
         for train_index, test_index in skf.split(grouped_firsts, grouped_firsts[self.label_col]):
             current_train_names = grouped_firsts[self.case_id_col][train_index]
-            train_chunk = data[data[self.case_id_col].isin(current_train_names)].sort_values(self.timestamp_col, ascending=True)
-            test_chunk = data[~data[self.case_id_col].isin(current_train_names)].sort_values(self.timestamp_col, ascending=True)
+            train_chunk = data[data[self.case_id_col].isin(current_train_names)].sort_values(self.timestamp_col, ascending=True, kind='mergesort')
+            test_chunk = data[~data[self.case_id_col].isin(current_train_names)].sort_values(self.timestamp_col, ascending=True, kind='mergesort')
             yield (train_chunk, test_chunk)
