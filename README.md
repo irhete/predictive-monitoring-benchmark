@@ -18,12 +18,14 @@ Moreover, the repository contains implementations of four bucketing methods (see
 * Clustering
 * Prefix length based
 
-The benchmark experiments have been performed using two classifiers:
+The benchmark experiments have been performed using four classifiers:
 
 * Random forest
-* Gradient boosted trees
+* Gradient boosted trees (XGBoost)
+* Logistic regression
+* SVM
 
-Together with the code, we make available 10 datasets that were used in the evaluation section in the paper. These datasets correspond to different prediction tasks, formulated on 3 publicly available event logs (namely, the [BPIC 2011](https://data.4tu.nl/repository/uuid:d9769f3d-0ab0-4fb8-803b-0d1120ffcf54), [BPIC 2015](http://data.4tu.nl/repository/uuid:31a308ef-c844-48da-948c-305d167a0ec1), and [BPIC 2017](http://data.4tu.nl/repository/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b) event logs). These (labeled and preprocessed) benchmark datasets can be found at https://drive.google.com/file/d/0B-ifLE4v5dewMlI5enJKWnBwb0k.
+Together with the code, we make available 22 datasets that were used in the evaluation section in the paper (2 datasets used in the paper are private). These datasets correspond to different prediction tasks, formulated on 8 publicly available event logs (namely, the [BPIC 2011](https://data.4tu.nl/repository/uuid:d9769f3d-0ab0-4fb8-803b-0d1120ffcf54), [BPIC 2012](https://data.4tu.nl/repository/uuid:3926db30-f712-4394-aebc-75976070e91f), [BPIC 2015](http://data.4tu.nl/repository/uuid:31a308ef-c844-48da-948c-305d167a0ec1), [BPIC 2017](http://data.4tu.nl/repository/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b), [Sepsis Cases](https://data.4tu.nl/repository/uuid:915d2bfb-7e84-49ad-a286-dc35f063a460), [Hospital Billing](https://data.4tu.nl/repository/uuid:76c46b83-c930-4798-a1c9-4be94dfeb741), [Road Traffic Fine Management](https://data.4tu.nl/repository/uuid:270fd440-1057-4fb9-89a9-b699b47990f5), [Production log](https://data.4tu.nl/repository/uuid:68726926-5ac5-4fab-b873-ee76ea412399) event logs). These (labeled and preprocessed) benchmark datasets can be found at https://drive.google.com/open?id=154hcH-HGThlcZJW5zBvCJMZvjOQDsnPR.
 
 If you use code from this repository, please cite the following paper:
 
