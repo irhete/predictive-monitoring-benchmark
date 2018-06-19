@@ -20,7 +20,10 @@ class PrefixLengthBucketer(object):
     
     def predict(self, X, y=None):
         
-        return X.groupby(self.case_id_col).size().as_matrix()
+        bucket_assignments = X.groupby(self.case_id_col).size()
+        while sum(~bucket_assignments.isin(self.n_states)) > 0:
+            bucket_assignments[~bucket_assignments.isin(self.n_states)] -= 1
+        return bucket_assignments.as_matrix()
     
     
     def fit_predict(self, X, y=None):

@@ -49,4 +49,6 @@ class LastStateTransformer(TransformerMixin):
         self.transform_time = time() - start
         return dt_transformed
     
+    def get_feature_names(self):
+        return self.columns
     

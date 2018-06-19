@@ -8,7 +8,6 @@ import numpy as np
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.neighbors import NearestNeighbors
 
 import time
 import os
@@ -31,6 +30,8 @@ cls_encoding = argv[5]
 cls_method = argv[6]
 gap = int(argv[7])
 n_iter = int(argv[8])
+cat_level_percentage = int(argv[9])
+cat_level_type = argv[10]
 
 if bucket_method == "state":
     bucket_encoding = "last"
@@ -76,6 +77,21 @@ for dataset_name in datasets:
     # read the data
     dataset_manager = DatasetManager(dataset_name)
     data = dataset_manager.read_dataset()
+    
+    # filter factor levels
+    # set infrequent factor levels to "other"
+    if cat_level_type == "dynamic":
+        cat_cols = dataset_manager.dynamic_cat_cols
+    elif cat_level_type == "static":
+        cat_cols = dataset_manager.static_cat_cols
+    else:
+        cat_cols = dataset_manager.dynamic_cat_cols + dataset_manager.static_cat_cols
+    for col in cat_cols:
+        counts = data[col].value_counts()
+        max_category_levels = int(np.round(len(counts) * cat_level_percentage / 100.0))
+        mask = data[col].isin(counts.index[max_category_levels:])
+        data.loc[mask, col] = "other"
+    
     cls_encoder_args = {'case_id_col': dataset_manager.case_id_col, 
                         'static_cat_cols': dataset_manager.static_cat_cols,
                         'static_num_cols': dataset_manager.static_num_cols, 
@@ -96,9 +112,9 @@ for dataset_name in datasets:
     train, test = dataset_manager.split_data_strict(data, train_ratio, split="temporal")
     
     if gap > 1:
-        outfile = os.path.join(results_dir, "performance_results_%s_%s_%s_gap%s.csv" % (cls_method, dataset_name, method_name, gap))
+        outfile = os.path.join(results_dir, "performance_results_%s_%s_%s_gap%s_factor%s_%s.csv" % (cls_method, dataset_name, method_name, gap, cat_level_percentage, cat_level_type))
     else:
-        outfile = os.path.join(results_dir, "performance_results_%s_%s_%s.csv" % (cls_method, dataset_name, method_name))
+        outfile = os.path.join(results_dir, "performance_results_%s_%s_%s_factor%s_%s.csv" % (cls_method, dataset_name, method_name, cat_level_percentage, cat_level_type))
         
     start_test_prefix_generation = time.time()
     dt_test_prefixes = dataset_manager.generate_prefix_data(test, min_prefix_length, max_prefix_length)
@@ -113,97 +129,108 @@ for dataset_name in datasets:
         dt_train_prefixes = dataset_manager.generate_prefix_data(train, min_prefix_length, max_prefix_length, gap)
         train_prefix_generation_time = time.time() - start_train_prefix_generation
         train_prefix_generation_times.append(train_prefix_generation_time)
-
+            
         # Bucketing prefixes based on control flow
-        knn_encoder_args = {'case_id_col':dataset_manager.case_id_col, 
-                            'static_cat_cols':[],
-                            'static_num_cols':[], 
-                            'dynamic_cat_cols':[dataset_manager.activity_col],
-                            'dynamic_num_cols':[], 
-                            'fillna':True}
-        # initiate the KNN model
+        bucketer_args = {'encoding_method':bucket_encoding, 
+                         'case_id_col':dataset_manager.case_id_col, 
+                         'cat_cols':[dataset_manager.activity_col], 
+                         'num_cols':[], 
+                         'random_state':random_state}
+        if bucket_method == "cluster":
+            bucketer_args["n_clusters"] = int(args["n_clusters"])
+        bucketer = BucketFactory.get_bucketer(bucket_method, **bucketer_args)
+
         start_offline_time_bucket = time.time()
-        bucket_encoder = EncoderFactory.get_encoder(bucket_encoding, **knn_encoder_args)
-        encoded_train = bucket_encoder.fit_transform(dt_train_prefixes)
-        if "n_neighbors" in args:
-            n_neighbors = int(args["n_neighbors"])
-        else:
-            n_neighbors = 50
-        bucketer = NearestNeighbors(n_neighbors=n_neighbors, algorithm='auto').fit(encoded_train)
+        bucket_assignments_train = bucketer.fit_predict(dt_train_prefixes)
         offline_time_bucket = time.time() - start_offline_time_bucket
+
+        bucket_assignments_test = bucketer.predict(dt_test_prefixes)
 
         preds_all = []
         test_y_all = []
         nr_events_all = []
         offline_time_fit = 0
         current_online_event_times = []
-            
-        for _, dt_test_bucket in dt_test_prefixes.groupby(dataset_manager.case_id_col):
-            
-            # select current test case
-            test_y_all.extend(dataset_manager.get_label_numeric(dt_test_bucket))
-            nr_events_all.append(len(dt_test_bucket))
-                
-            start = time.time()
-            encoded_case = bucket_encoder.fit_transform(dt_test_bucket)
-            _, knn_idxs = bucketer.kneighbors(encoded_case)
-            knn_idxs = knn_idxs[0]
-                
-            relevant_cases_bucket = encoded_train.iloc[knn_idxs].index
-            dt_train_bucket = dataset_manager.get_relevant_data_by_indexes(dt_train_prefixes, relevant_cases_bucket) # one row per event
-            train_y = dataset_manager.get_label_numeric(dt_train_bucket)
-
-            if len(set(train_y)) < 2:
-                preds_all.append(train_y[0])
+        for bucket in set(bucket_assignments_test):
+            if bucket_method == "prefix":
+                current_args = args[bucket]
             else:
-                feature_combiner = FeatureUnion([(method, EncoderFactory.get_encoder(method, **cls_encoder_args)) for method in methods])
+                current_args = args
+            relevant_train_cases_bucket = dataset_manager.get_indexes(dt_train_prefixes)[bucket_assignments_train == bucket]
+            relevant_test_cases_bucket = dataset_manager.get_indexes(dt_test_prefixes)[bucket_assignments_test == bucket]
+            dt_test_bucket = dataset_manager.get_relevant_data_by_indexes(dt_test_prefixes, relevant_test_cases_bucket)
+            test_y = dataset_manager.get_label_numeric(dt_test_bucket)
+            nr_events_all.extend(list(dataset_manager.get_prefix_lengths(dt_test_bucket)))
+            if len(relevant_train_cases_bucket) == 0:
+                preds = [dataset_manager.get_class_ratio(train)] * len(relevant_test_cases_bucket)
+                current_online_event_times.extend([0] * len(preds))
+            else:
+                dt_train_bucket = dataset_manager.get_relevant_data_by_indexes(dt_train_prefixes, relevant_train_cases_bucket) # one row per event
+                train_y = dataset_manager.get_label_numeric(dt_train_bucket)
 
-                if cls_method == "rf":
-                    cls = RandomForestClassifier(n_estimators=500,
-                                                 max_features=args['max_features'],
+                if len(set(train_y)) < 2:
+                    preds = [train_y[0]] * len(relevant_test_cases_bucket)
+                    current_online_event_times.extend([0] * len(preds))
+                else:
+                    start_offline_time_fit = time.time()
+                    feature_combiner = FeatureUnion([(method, EncoderFactory.get_encoder(method, **cls_encoder_args)) for method in methods])
+
+                    if cls_method == "rf":
+                        cls = RandomForestClassifier(n_estimators=500,
+                                                     max_features=current_args['max_features'],
+                                                     random_state=random_state)
+
+                    elif cls_method == "xgboost":
+                        cls = xgb.XGBClassifier(objective='binary:logistic',
+                                                n_estimators=500,
+                                                learning_rate= current_args['learning_rate'],
+                                                subsample=current_args['subsample'],
+                                                max_depth=int(current_args['max_depth']),
+                                                colsample_bytree=current_args['colsample_bytree'],
+                                                min_child_weight=int(current_args['min_child_weight']),
+                                                seed=random_state)
+
+                    elif cls_method == "logit":
+                        cls = LogisticRegression(C=2**current_args['C'],
                                                  random_state=random_state)
 
-                elif cls_method == "xgboost":
-                    cls = xgb.XGBClassifier(objective='binary:logistic',
-                                            n_estimators=500,
-                                            learning_rate= args['learning_rate'],
-                                            subsample=args['subsample'],
-                                            max_depth=int(args['max_depth']),
-                                            colsample_bytree=args['colsample_bytree'],
-                                            min_child_weight=int(args['min_child_weight']),
-                                            seed=random_state)
+                    elif cls_method == "svm":
+                        cls = SVC(C=2**current_args['C'],
+                                  gamma=2**current_args['gamma'],
+                                  random_state=random_state)
 
-                elif cls_method == "logit":
-                    cls = LogisticRegression(C=2**args['C'],
-                                             random_state=random_state)
+                    if cls_method == "svm" or cls_method == "logit":
+                        pipeline = Pipeline([('encoder', feature_combiner), ('scaler', StandardScaler()), ('cls', cls)])
+                    else:
+                        pipeline = Pipeline([('encoder', feature_combiner), ('cls', cls)])
 
-                elif cls_method == "svm":
-                    cls = SVC(C=2**args['C'],
-                              gamma=2**args['gamma'],
-                              random_state=random_state)
+                    pipeline.fit(dt_train_bucket, train_y)
+                    offline_time_fit += time.time() - start_offline_time_fit
 
-                if cls_method == "svm" or cls_method == "logit":
-                    pipeline = Pipeline([('encoder', feature_combiner), ('scaler', StandardScaler()), ('cls', cls)])
-                else:
-                    pipeline = Pipeline([('encoder', feature_combiner), ('cls', cls)])
+                    # predict separately for each prefix case
+                    preds = []
+                    test_all_grouped = dt_test_bucket.groupby(dataset_manager.case_id_col)
+                    for _, group in test_all_grouped:
+                        start = time.time()
+                        _ = bucketer.predict(group)
+                        if cls_method == "svm":
+                            pred = pipeline.decision_function(group)
+                        else:
+                            preds_pos_label_idx = np.where(cls.classes_ == 1)[0][0]
+                            pred = pipeline.predict_proba(group)[:,preds_pos_label_idx]
 
-                pipeline.fit(dt_train_bucket, train_y)
-                    
-                if cls_method == "svm":
-                    preds = pipeline.decision_function(dt_test_bucket)
-                else:
-                    preds_pos_label_idx = np.where(cls.classes_ == 1)[0][0]
-                    preds = pipeline.predict_proba(dt_test_bucket)[:,preds_pos_label_idx]
+                        pipeline_pred_time = time.time() - start
+                        current_online_event_times.append(pipeline_pred_time / len(group))
+                        preds.extend(pred)
 
-                preds_all.extend(preds)
-                    
-            pipeline_pred_time = time.time() - start
-            current_online_event_times.append(pipeline_pred_time / len(dt_test_bucket))
+            preds_all.extend(preds)
+            test_y_all.extend(test_y)
 
-        offline_total_time = offline_time_bucket + train_prefix_generation_time
+        offline_total_time = offline_time_bucket + offline_time_fit + train_prefix_generation_time
         offline_total_times.append(offline_total_time)
         online_event_times.append(current_online_event_times)
-            
+
+        
     with open(outfile, 'w') as fout:
         fout.write("%s;%s;%s;%s;%s;%s;%s\n"%("dataset", "method", "cls", "nr_events", "n_iter", "metric", "score"))
 

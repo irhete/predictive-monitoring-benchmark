@@ -2,33 +2,41 @@ import pandas as pd
 import numpy as np
 import os
 
-input_data_folder = "../labeled_logs_csv"
+input_data_folder = "../orig_logs"
 output_data_folder = "../labeled_logs_csv_processed"
-filenames = ["BPIC15_%s_f%s.csv"%(municipality, formula) for municipality in range(1,6) for formula in range(2,3)]
+filenames = ["Production.csv"]
 
 case_id_col = "Case ID"
 activity_col = "Activity"
-resource_col = "org:resource"
-timestamp_col = "time:timestamp"
+resource_col = "Resource"
+timestamp_col = "Complete Timestamp"
 label_col = "label"
 pos_label = "deviant"
 neg_label = "regular"
 
-category_freq_threshold = 10
+freq_threshold = 10
+timeunit = 'm'
 
 # features for classifier
-dynamic_cat_cols = ["Activity", "monitoringResource", "question", "org:resource"]
-static_cat_cols = ["Responsible_actor"]
-dynamic_num_cols = []
-static_num_cols = ["SUMleges"]
+static_cat_cols = ["Part_Desc_", "Rework"]
+static_num_cols = ["Work_Order_Qty"]
+dynamic_cat_cols = [activity_col, resource_col, "Report_Type", "Resource.1"]
+dynamic_num_cols = ["Qty_Completed", "Qty_for_MRB", "activity_duration"]
 
-static_cols_base = static_cat_cols + static_num_cols + [case_id_col, label_col]
+static_cols = static_cat_cols + static_num_cols + [case_id_col, label_col]
 dynamic_cols = dynamic_cat_cols + dynamic_num_cols + [timestamp_col]
 cat_cols = dynamic_cat_cols + static_cat_cols
 
-
-def split_parts(group, parts_col="parts"):
-    return pd.Series(group[parts_col].str.split(',').values[0], name='vals')
+def assign_label(group):
+    tmp = group["Qty_Rejected"] > 0
+    tmp = tmp.reset_index()["Qty_Rejected"]
+    if sum(tmp) > 0:
+        idx = tmp[tmp==True].index[0]
+        group = group.iloc[:idx,:]
+        group[label_col] = pos_label
+    else:
+        group[label_col] = neg_label
+    return group
 
 def extract_timestamp_features(group):
     
@@ -52,21 +60,19 @@ def get_open_cases(date):
 
 
 for filename in filenames:
-    data = pd.read_csv(os.path.join(input_data_folder, filename), sep=";", encoding='latin-1')
+    
+    data = pd.read_csv(os.path.join(input_data_folder,filename), sep=";")
 
-    data = data[data["caseStatus"] == "G"] # G is closed, O is open
-
-    # switch labels (deviant/regular was set incorrectly before)
-    data = data.set_value(col=label_col, index=(data[label_col] == pos_label), value="normal")
-    data = data.set_value(col=label_col, index=(data[label_col] == neg_label), value=pos_label)
-    data = data.set_value(col=label_col, index=(data[label_col] == "normal"), value=neg_label)
-
-    # split the parts attribute to separate columns
-    ser = data.groupby(level=0).apply(split_parts)
-    dt_parts = pd.get_dummies(ser).groupby(level=0).apply(lambda group: group.max())
-    data = pd.concat([data, dt_parts], axis=1)
-    static_cols = static_cols_base + list(dt_parts.columns)
-
+    # add event duration
+    data["Complete Timestamp"] = pd.to_datetime(data["Complete Timestamp"])
+    data["Start Timestamp"] = pd.to_datetime(data["Start Timestamp"])
+    tmp = data["Complete Timestamp"] - data["Start Timestamp"]
+    tmp = tmp.fillna(0)
+    data["activity_duration"] = tmp.apply(lambda x: float(x / np.timedelta64(1, timeunit)))
+    
+    # assign labels
+    data = data.sort_values(timestamp_col, ascending=True, kind='mergesort').groupby(case_id_col).apply(assign_label)
+    
     data = data[static_cols + dynamic_cols]
 
     # add features extracted from timestamp
@@ -90,13 +96,12 @@ for filename in filenames:
         
     data[cat_cols] = data[cat_cols].fillna('missing')
     data = data.fillna(0)
-    
+        
     # set infrequent factor levels to "other"
     for col in cat_cols:
-        if col not in [activity_col, resource_col]:
-            counts = data[col].value_counts()
-            mask = data[col].isin(counts[counts >= category_freq_threshold].index)
-            data.loc[~mask, col] = "other"
-    
+        counts = data[col].value_counts()
+        mask = data[col].isin(counts[counts >= freq_threshold].index)
+        data.loc[~mask, col] = "other"
+
     data.to_csv(os.path.join(output_data_folder,filename), sep=";", index=False)
     
