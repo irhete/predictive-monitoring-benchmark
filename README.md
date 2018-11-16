@@ -30,17 +30,10 @@ Together with the code, we make available 22 datasets that were used in the eval
 If you use code from this repository, please cite the following paper:
 
 ```
-@article{Teinemaa2017,
-   author = {{Teinemaa}, I. and {Dumas}, M. and {La Rosa}, M. and {Maggi}, F.~M.},
-    title = "{Outcome-Oriented Predictive Process Monitoring: Review and Benchmark}",
-  journal = {ArXiv e-prints},
-archivePrefix = "arXiv",
-   eprint = {1707.06766},
- primaryClass = "cs.AI",
- keywords = {Computer Science - Artificial Intelligence},
-     year = 2017,
-    month = jul,
-   adsurl = {http://adsabs.harvard.edu/abs/2017arXiv170706766T},
-  adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+@article{teinemaa2017outcome,
+  title={Outcome-Oriented Predictive Process Monitoring: Review and Benchmark},
+  author={Teinemaa, Irene and Dumas, Marlon and La Rosa, Marcello and Maggi, Fabrizio Maria},
+  journal={arXiv preprint arXiv:1707.06766},
+  year={2017}
 }
 ```
