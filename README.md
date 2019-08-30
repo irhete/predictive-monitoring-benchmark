@@ -30,10 +30,16 @@ Together with the code, we make available 22 datasets that were used in the eval
 If you use code from this repository, please cite the following paper:
 
 ```
-@article{teinemaa2017outcome,
-  title={Outcome-Oriented Predictive Process Monitoring: Review and Benchmark},
-  author={Teinemaa, Irene and Dumas, Marlon and La Rosa, Marcello and Maggi, Fabrizio Maria},
-  journal={arXiv preprint arXiv:1707.06766},
-  year={2017}
+@article{teinemaa2019outcome,
+  author    = {Irene Teinemaa and
+               Marlon Dumas and
+               Marcello La Rosa and
+               Fabrizio Maria Maggi},
+  title     = {Outcome-Oriented Predictive Process Monitoring: Review and Benchmark},
+  journal   = {{TKDD}},
+  volume    = {13},
+  number    = {2},
+  pages     = {17:1--17:57},
+  year      = {2019}
 }
 ```
