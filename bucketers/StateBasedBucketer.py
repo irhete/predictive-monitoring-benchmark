@@ -31,8 +31,7 @@ class StateBasedBucketer(object):
         dt_transformed = pd.merge(dt_encoded, self.dt_states, how='left')
         dt_transformed.fillna(-1, inplace=True)
         
-        return dt_transformed["state"].astype(int).as_matrix()
-    
+        return dt_transformed["state"].astype(int).to_numpy()    
     
     def fit_predict(self, X, y=None):
         

@@ -28,11 +28,11 @@ class IndexBasedTransformer(TransformerMixin):
         grouped = X.groupby(self.case_id_col, as_index=False)
         
         if self.max_events is None:
-            self.max_events = grouped.size().max()
+            self.max_events = grouped.size().max(numeric_only=True).size
         
         
         dt_transformed = pd.DataFrame(grouped.apply(lambda x: x.name), columns=[self.case_id_col])
-        for i in range(self.max_events):
+        for i in range(0, self.max_events):
             dt_index = grouped.nth(i)[[self.case_id_col] + self.cat_cols + self.num_cols]
             dt_index.columns = [self.case_id_col] + ["%s_%s"%(col, i) for col in self.cat_cols] + ["%s_%s"%(col, i) for col in self.num_cols]
             dt_transformed = pd.merge(dt_transformed, dt_index, on=self.case_id_col, how="left")
